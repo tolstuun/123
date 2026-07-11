@@ -83,6 +83,7 @@ async def collect_once():
     try:
         with connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT completed_at FROM collection_checkpoints WHERE name='analyses'"); row=cur.fetchone(); cutoff=(row["completed_at"]-timedelta(hours=settings.overlap_hours)) if row and row["completed_at"] else now-timedelta(hours=24)
+            cur.execute("INSERT INTO collection_checkpoints(name,completed_at) VALUES('analyses',%s) ON CONFLICT(name) DO NOTHING",(cutoff,)); conn.commit()
         max_id=None; seen=set(); newest=None
         while True:
             rows=await client.analyses(max_id)
@@ -100,6 +101,8 @@ async def collect_once():
                     detail=await client.detail(aid); vtis=await client.vtis(aid); sample=await client.sample(item["analysis_sample_id"])
                     archive=None if exists else await client.archive(aid)
                     ingest(detail,vtis,sample,archive); ingested+=1
+                    with connection() as conn, conn.cursor() as cur:
+                        cur.execute("UPDATE collector_status SET state='running',last_success_at=now(),connectivity_ok=true,lag_seconds=%s,message=%s WHERE singleton",(int((now-completed).total_seconds()) if completed else None,f"Ingested analysis {aid}; backfill in progress")); conn.commit()
                 except Exception as exc:
                     failed+=1; message=str(exc).replace(settings.vmray_api_key,"[REDACTED]")[:1000]
                     with connection() as conn, conn.cursor() as cur: cur.execute("INSERT INTO collection_errors(batch_id,analysis_id,error_type,message) VALUES(%s,%s,%s,%s)",(batch,aid,type(exc).__name__,message)); conn.commit()
