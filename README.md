@@ -4,7 +4,7 @@ Production-oriented preservation and analytics for VMRay's short-lived analysis 
 
 ## Local operation
 
-Copy `.env.example` to `.env`, set strong local values and VMRay credentials, then run `make up`. Open `http://localhost:8081`; `/health` and `/ready` are unauthenticated and contain no sensitive data. Use `make collect` for a one-shot read-only collection and `make logs` for logs.
+Copy `.env.example` to `.env`, set strong local values and VMRay credentials, then run `make up`. Open `http://localhost`; `/health` and `/ready` are unauthenticated and contain no sensitive data. Use `make collect` for a one-shot read-only collection and `make logs` for logs.
 
 ## Commands
 
