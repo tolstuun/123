@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0 - 2026-07-11
+
+- Separated VMRay submission provenance from logical experiment cycles and safely reconstructed production using deterministic start-time clustering.
+
 ## 1.0.1 - 2026-07-11
 
 - Corrected six-slot group completeness, added missing/duplicate/unmapped drill-downs, separated group and sample entity metrics, and rebuilt Overview with local accessible SVG charts.

@@ -70,7 +70,7 @@ def summarize(proposals,unassigned,total):
     for p in proposals:
         seconds=int((p.last_at-p.first_at).total_seconds());spans["0-30s" if seconds<=30 else "31-60s" if seconds<=60 else "61-300s"]+=1
     complete=sum(len(p.assignments)==6 and not p.ambiguity for p in proposals)
-    return {"eligible_analyses":total,"logical_groups":len(proposals),"complete_groups":complete,"incomplete_groups":len(proposals)-complete,
+    return {"unique_sample_hashes":len({p.sample_id for p in proposals}),"eligible_analyses":total,"logical_groups":len(proposals),"complete_groups":complete,"incomplete_groups":len(proposals)-complete,
             "ambiguous_groups":sum(p.ambiguity for p in proposals),"unassigned_analyses":len(unassigned),"cycle_sizes":dict(sorted(sizes.items())),
             "temporal_spans":dict(spans),"duplicate_slot_clusters":sum(p.ambiguity for p in proposals)}
 

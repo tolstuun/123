@@ -33,4 +33,6 @@ Temporal linkage is assigned medium confidence because it is strongly evidenced 
 
 ## Production reconstruction
 
-Pending deployment run; this section is updated with aggregate dry-run and applied results before task completion.
+The collector was paused to freeze the production dataset. The final dry-run proposed 243 logical groups from 1,402 eligible immutable analyses: 224 complete, 19 incomplete, zero ambiguous, and zero unassigned. Cycle sizes were five groups with two slots, eight with three, six with four, and 224 with all six. Temporal spans were 204 groups at 0–30 seconds, 36 at 31–60 seconds, and three at 61–300 seconds. No duplicate-slot cluster was proposed.
+
+The identical proposal was applied transactionally. Post-apply checks found 718 source submission groups, 243 logical experiment groups, 1,402 exclusive logical assignments, zero duplicate assignments, zero cross-sample groups, zero missing source-provenance links, and the same 1,402 source analyses as before. The collector was then restarted. These are a point-in-time reconstruction snapshot; continuous ingestion can increase live counts.
