@@ -5,6 +5,7 @@ from .db import connection
 from .domain import classify_support, normalize_ioc, normalize_verdict, payload_digest
 from .migrate import migrate
 from .vmray import VMRayClient, parse_time
+from .grouping import regroup_sample
 
 logging.basicConfig(level=logging.INFO, format='{"time":"%(asctime)s","level":"%(levelname)s","message":"%(message)s"}')
 log = logging.getLogger("collector")
@@ -69,9 +70,8 @@ def ingest(detail_payload, vti_payload, sample_payload, archive_content=None, de
         for i in iocs:
             normalized=normalize_ioc(i["type"],i["value"]); actionable=str(i.get("verdict") or "").lower() in {"malicious","suspicious"}
             cur.execute("INSERT INTO ioc_observations(analysis_run_id,ioc_type,original_value,normalized_value,verdict,source,extraction_context,actionable,observed_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",(run,i["type"],i["value"],normalized,i.get("verdict"),i.get("source"),i.get("context"),actionable,created))
-        if analysis_type=="static":
-            cur.execute("WITH ranked AS (SELECT id,row_number() OVER(ORDER BY created_at,vmray_analysis_id) n FROM analysis_runs WHERE group_id=%s AND analysis_type='static') UPDATE analysis_runs r SET static_repetition=ranked.n FROM ranked WHERE r.id=ranked.id",(group,))
         conn.commit()
+    return sample_pk
 
 
 async def collect_once():
@@ -100,7 +100,7 @@ async def collect_once():
                         cur.execute("SELECT 1 FROM analysis_runs WHERE vmray_analysis_id=%s AND NOT is_demo",(aid,)); exists=cur.fetchone()
                     detail=await client.detail(aid); vtis=await client.vtis(aid); sample=await client.sample(item["analysis_sample_id"])
                     archive=None if exists else await client.archive(aid)
-                    ingest(detail,vtis,sample,archive); ingested+=1
+                    sample_pk=ingest(detail,vtis,sample,archive); regroup_sample(sample_pk); ingested+=1
                     with connection() as conn, conn.cursor() as cur:
                         cur.execute("UPDATE collector_status SET state='running',last_success_at=now(),connectivity_ok=true,lag_seconds=%s,message=%s WHERE singleton",(int((now-completed).total_seconds()) if completed else None,f"Ingested analysis {aid}; backfill in progress")); conn.commit()
                 except Exception as exc:

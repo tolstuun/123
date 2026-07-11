@@ -11,12 +11,13 @@
 
 <section class="kpi-grid" aria-label="Overview metrics">
   <article title="Distinct sample records identified by SHA-256 in the selected range"><span>Unique sample hashes</span><strong>{{ metrics.unique_samples }}</strong></article>
-  <article title="Logical experiment groups in the selected range"><span>Analysis groups</span><strong>{{ metrics.analysis_groups }}</strong></article>
+  <article title="Logical six-run experiment cycles in the selected range"><span>Logical experiment groups</span><strong>{{ metrics.logical_groups }}</strong></article>
   <article title="All immutable analysis observations in the selected range"><span>Total analyses</span><strong>{{ metrics.analyses }}</strong></article>
   <article class="positive" title="Groups with exactly one observation in each of the six expected slots"><span>Complete groups</span><strong>{{ metrics.complete_groups }}</strong></article>
   <a class="kpi-card warning-card" href="/groups/incomplete?days={{ days }}&mode={{ mode }}" title="Groups missing at least one expected slot"><span>Incomplete groups</span><strong>{{ metrics.incomplete_groups }}</strong><small>View missing slots →</small></a>
-  <article title="Groups with more than one observation assigned to an expected slot"><span>Groups with duplicate slots</span><strong>{{ metrics.duplicate_groups }}</strong></article>
-  <article title="Analyses that cannot be mapped to an expected static or dynamic slot"><span>Unmapped analyses</span><strong>{{ metrics.unmapped_analyses }}</strong></article>
+  <article title="Logical groups with competing temporal candidates or slot conflicts"><span>Ambiguous logical groups</span><strong>{{ metrics.ambiguous_groups }}</strong></article>
+  <article title="Analyses retained without a safe logical experiment assignment"><span>Unassigned analyses</span><strong>{{ metrics.unassigned_analyses }}</strong></article>
+  <article title="VMRay submission provenance groups; not used as experiment boundaries"><span>Source submission groups</span><strong>{{ metrics.source_submission_groups }}</strong></article>
   <article title="Static analysis observations in the selected range"><span>Static analyses</span><strong>{{ metrics.static_analyses }}</strong></article>
   <article title="Dynamic analysis observations in the selected range"><span>Dynamic analyses</span><strong>{{ metrics.dynamic_analyses }}</strong></article>
   <article title="Analysis observations completed since 00:00 UTC"><span>Analyses today</span><strong>{{ metrics.analyses_today }}</strong></article>
