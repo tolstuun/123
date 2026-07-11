@@ -4,6 +4,6 @@ Pushes to `main` run focused tests, build the image, transfer a release over SSH
 
 Manual production startup: `cd /home/deploy/vmray-analytics && ./ops/provision-env.sh && docker compose run --rm migrate && docker compose up -d --build`.
 
-The dashboard is at `http://77.42.72.36:8080`. Retrieve credentials on the host without transmitting them through CI: `ssh -i C:\Users\Administrator\.ssh\vmray_analytics_deploy deploy@77.42.72.36 "cd /home/deploy/vmray-analytics && grep -E '^(DASHBOARD_USERNAME|DASHBOARD_PASSWORD)=' .env"`.
+The dashboard is at `http://77.42.72.36:8081`; 8081 is used because existing host services occupy ports 80/8000/8080. Retrieve credentials on the host without transmitting them through CI: `ssh -i C:\Users\Administrator\.ssh\vmray_analytics_deploy deploy@77.42.72.36 "cd /home/deploy/vmray-analytics && grep -E '^(DASHBOARD_USERNAME|DASHBOARD_PASSWORD)=' .env"`.
 
-Health: `curl -fsS http://77.42.72.36:8080/health`; readiness: `curl -fsS http://77.42.72.36:8080/ready`.
+Health: `curl -fsS http://77.42.72.36:8081/health`; readiness: `curl -fsS http://77.42.72.36:8081/ready`.

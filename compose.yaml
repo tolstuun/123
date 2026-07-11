@@ -39,7 +39,7 @@ services:
     security_opt: [no-new-privileges:true]
   proxy:
     image: caddy:2.10-alpine
-    ports: ["8080:8080"]
+    ports: ["8081:8080"]
     volumes: [./ops/Caddyfile:/etc/caddy/Caddyfile:ro]
     depends_on: {web: {condition: service_healthy}}
     restart: unless-stopped

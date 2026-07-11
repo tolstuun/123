@@ -14,4 +14,4 @@ logs:
 backup:
 	sh ops/backup.sh
 ready:
-	curl -fsS http://localhost:8080/ready
+	curl -fsS http://localhost:8081/ready
