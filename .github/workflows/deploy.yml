@@ -1,0 +1,40 @@
+name: Test and deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency: {group: production, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install '.[test]' && pytest -q
+      - run: docker build -t vmray-analytics:${{ github.sha }} .
+      - name: Configure SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+      - name: Transfer release
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" 'mkdir -p /home/deploy/vmray-analytics'
+          tar --exclude=.git --exclude=.env --exclude=private_docs --exclude=runtime --exclude=backups -czf - . | ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" 'cd /home/deploy/vmray-analytics && tar -xzf -'
+      - name: Deploy and verify
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" 'cd /home/deploy/vmray-analytics && chmod +x ops/*.sh && ./ops/provision-env.sh && docker compose build && docker compose run --rm migrate && docker compose up -d --build --remove-orphans && for i in $(seq 1 30); do curl -fsS http://localhost:8080/ready && break; sleep 5; done && curl -fsS http://localhost:8080/ready && docker compose ps'

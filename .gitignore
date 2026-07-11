@@ -1,0 +1,36 @@
+# Private documentation and credentials
+private_docs/
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Local databases and runtime state
+*.db
+*.sqlite
+*.sqlite3
+data/
+runtime/
+
+# Generated backups
+backups/
+*.dump
+*.dump.gz
+*.sql.gz
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
