@@ -1,5 +1,7 @@
 :8080 {
   encode zstd gzip
-  request_body { max_size 1MB }
+  request_body {
+    max_size 1MB
+  }
   reverse_proxy web:8000
 }

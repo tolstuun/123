@@ -8,6 +8,7 @@ from .vmray import VMRayClient, parse_time
 
 logging.basicConfig(level=logging.INFO, format='{"time":"%(asctime)s","level":"%(levelname)s","message":"%(message)s"}')
 log = logging.getLogger("collector")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 PARSER_VERSION = "1.0.0"
 
 
