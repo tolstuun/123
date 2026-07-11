@@ -17,3 +17,6 @@ test = ["pytest==8.3.5"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["app"]

@@ -3,6 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home app
 WORKDIR /app
 COPY pyproject.toml ./
+COPY app/__init__.py app/__init__.py
 RUN pip install --no-cache-dir .
 COPY --chown=app:app . .
 USER app
