@@ -19,7 +19,7 @@ jobs:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s' "$KEY" > ~/.ssh/deploy_key
+          printf '%s' "$KEY" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' '77.42.72.36 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHqwEp5zxtWtQAodDEdNPjycCIiPa7mePKHVP2w+Cb4Q' > ~/.ssh/known_hosts
       - name: Transfer release
