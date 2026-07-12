@@ -4,11 +4,19 @@ RUN_KINDS = ("Static", "Dynamic 60s", "Dynamic 120s", "Dynamic 180s")
 VERDICT_CATEGORIES = ("malicious", "suspicious", "benign", "unknown", "failed", "mixed", "missing")
 SUPPORT_CATEGORIES = ("av_only", "yara_only", "av_yara_only", "behavioral", "none", "missing")
 
+SAMPLE_COHORT_SQL = """
+SELECT s.id sample_id,s.first_seen,
+ EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='static') has_static,
+ EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=60) has_dynamic_60,
+ EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=120) has_dynamic_120,
+ EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=180) has_dynamic_180
+FROM samples s WHERE {mode_clause} AND s.first_seen >= %s
+"""
+
 SAMPLE_RESULTS_SQL = """
 WITH selected AS (
  SELECT s.id,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict
- FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id
- WHERE {mode_clause} AND s.latest_seen >= %s
+ FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.id=ANY(%s)
 ), kinds(kind) AS (VALUES ('Static'),('Dynamic 60s'),('Dynamic 120s'),('Dynamic 180s')),
 evidence AS (
  SELECT selected.id sample_id,k.kind,
@@ -28,10 +36,16 @@ FROM evidence
 """
 
 
-def fetch_sample_results(cur, mode, start):
+def fetch_sample_cohort(cur, mode, start):
     clause = "TRUE" if mode == "combined" else "s.is_demo=%s"
     args = (start,) if mode == "combined" else (mode == "demo", start)
-    cur.execute(SAMPLE_RESULTS_SQL.format(mode_clause=clause), args)
+    cur.execute(SAMPLE_COHORT_SQL.format(mode_clause=clause), args)
+    return cur.fetchall()
+
+
+def fetch_sample_results(cur, sample_ids):
+    if not sample_ids:return []
+    cur.execute(SAMPLE_RESULTS_SQL, (list(sample_ids),))
     return cur.fetchall()
 
 
@@ -46,6 +60,15 @@ def summarize_sample_results(rows):
          "av_yara_malicious":sum(r["support"] in ("av_only","yara_only","av_yara_only") and r["verdict"]=="malicious" for r in selected),
          "av_yara_suspicious":sum(r["support"] in ("av_only","yara_only","av_yara_only") and r["verdict"]=="suspicious" for r in selected)})
     return output
+
+
+def summarize_cohort(rows):
+    metrics={"samples_received":len(rows),"static_analyzed":sum(r["has_static"] for r in rows),"dynamic_60":sum(r["has_dynamic_60"] for r in rows),"dynamic_120":sum(r["has_dynamic_120"] for r in rows),"dynamic_180":sum(r["has_dynamic_180"] for r in rows)}
+    daily=[]
+    for day in sorted({r["first_seen"].date() for r in rows}):
+        selected=[r for r in rows if r["first_seen"].date()==day]
+        daily.append({"day":day,"samples_received":len(selected),"static_analyzed":sum(r["has_static"] for r in selected),"dynamic_60":sum(r["has_dynamic_60"] for r in selected),"dynamic_120":sum(r["has_dynamic_120"] for r in selected),"dynamic_180":sum(r["has_dynamic_180"] for r in selected)})
+    return metrics,daily
 
 
 def zero_fill_daily(start: date, end: date, rows, keys):

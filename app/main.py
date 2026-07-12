@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .db import connection, open_pool
 from .migrate import migrate
-from .analytics import VERDICT_CATEGORIES, fetch_sample_results, summarize_sample_results, zero_fill_daily
+from .analytics import VERDICT_CATEGORIES, fetch_sample_cohort, fetch_sample_results, summarize_cohort, summarize_sample_results, zero_fill_daily
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
 templates=Jinja2Templates(directory="app/templates"); app.mount("/static",StaticFiles(directory="app/static"),name="static"); security=HTTPBasic()
@@ -69,23 +69,17 @@ templates.env.globals.update(human_time=human_time,human_duration=human_duration
 
 @app.get("/",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def overview(request:Request):
-    mode,start,days=filters(request); where,args=mode_sql(mode); metric=request.query_params.get("metric","runs"); metric=metric if metric in {"runs","samples"} else "runs"; end=datetime.now(timezone.utc).date()
+    mode,start,days=filters(request); end=datetime.now(timezone.utc).date()
     with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT count(*) analyses,count(DISTINCT sample_id) unique_samples,count(*) FILTER(WHERE analysis_type='static') static_analyses,count(*) FILTER(WHERE analysis_type='dynamic') dynamic_analyses,count(*) FILTER(WHERE completed_at>=date_trunc('day',now())) analyses_today FROM analysis_runs r WHERE {where} AND completed_at>=%s",args+(start,)); metrics=cur.fetchone()
-        sample_where,sample_args=mode_sql(mode,"s"); cur.execute(f"SELECT count(*) FILTER(WHERE first_seen>=date_trunc('day',now())) samples_first_seen_today FROM samples s WHERE {sample_where}",sample_args); metrics.update(cur.fetchone())
-        cur.execute(f"SELECT count(*) unique_samples,count(*) FILTER(WHERE sas.static_count=0) missing_static,count(*) FILTER(WHERE sas.dynamic_60_count=0) missing_60,count(*) FILTER(WHERE sas.dynamic_120_count=0) missing_120,count(*) FILTER(WHERE sas.dynamic_180_count=0) missing_180 FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE {sample_where} AND s.latest_seen>=%s",sample_args+(start,)); metrics.update(cur.fetchone())
-        if metric=="runs":
-            cur.execute(f"SELECT completed_at::date AS \"day\",count(*) FILTER(WHERE analysis_type='static') static,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=60) dynamic_60,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=120) dynamic_120,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=180) dynamic_180,count(*) FILTER(WHERE NOT (analysis_type='static' OR (analysis_type='dynamic' AND duration_bucket IN(60,120,180)))) other FROM analysis_runs r WHERE {where} AND completed_at>=%s GROUP BY 1 ORDER BY 1",args+(start,)); raw_daily=cur.fetchall(); keys=("static","dynamic_60","dynamic_120","dynamic_180","other")
-        elif metric=="samples":
-            cur.execute(f"SELECT first_seen::date AS \"day\",count(*) total FROM samples s WHERE {sample_where} AND first_seen>=%s GROUP BY 1 ORDER BY 1",sample_args+(start,)); raw_daily=cur.fetchall(); keys=("total",)
-        daily=zero_fill_daily(start.date(),end,raw_daily,keys)
-        sample_results=fetch_sample_results(cur,mode,start)
+        cohort=fetch_sample_cohort(cur,mode,start); sample_ids={row["sample_id"] for row in cohort}
+        sample_results=fetch_sample_results(cur,sample_ids)
         cur.execute("SELECT * FROM collector_status WHERE singleton"); collector=cur.fetchone()
         cur.execute("SELECT count(*) count FROM collection_errors WHERE occurred_at>=now()-interval '24 hours'"); recent_errors=cur.fetchone()["count"]
-    chart_max=max([sum(row[key] for key in keys) for row in daily] or [1]); chart_max=max(chart_max,1)
+    metrics,raw_daily=summarize_cohort(cohort)
+    keys=("samples_received","static_analyzed","dynamic_60","dynamic_120","dynamic_180");daily=zero_fill_daily(start.date(),end,raw_daily,keys)
     sample_summary=summarize_sample_results(sample_results)
     verdict_matrix=[{"kind":row["kind"],"counts":row["verdicts"],"total":row["total"]} for row in sample_summary]
-    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"chart_max":chart_max,"metric":metric,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":sample_summary,"collector":collector,"recent_errors":recent_errors})
+    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":sample_summary,"collector":collector,"recent_errors":recent_errors})
 
 
 @app.get("/verdicts",response_class=HTMLResponse,dependencies=[Depends(auth)])
