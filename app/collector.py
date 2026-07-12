@@ -117,6 +117,7 @@ async def collect_once():
         totals={"discovered":0,"new":0,"skipped_existing":0,"ingested":0,"updated":0,"failed":0,"regrouped_samples":0}
         try:
             with connection() as conn,conn.cursor() as cur:
+                cur.execute("UPDATE ingestion_batches SET status='interrupted',completed_at=now() WHERE status='running'")
                 cur.execute("INSERT INTO ingestion_batches(status) VALUES('running') RETURNING id");batch=cur.fetchone()["id"]
                 cur.execute("UPDATE collector_status SET state='running',last_attempt_at=%s WHERE singleton",(now,));conn.commit()
                 cur.execute("SELECT completed_at FROM collection_checkpoints WHERE name='analyses'");row=cur.fetchone();cutoff=(row["completed_at"]-timedelta(hours=settings.overlap_hours)) if row and row["completed_at"] else now-timedelta(hours=24)
@@ -148,6 +149,14 @@ async def collect_once():
                 cur.execute("UPDATE ingestion_batches SET completed_at=now(),status=%s,discovered=%s,ingested=%s,failed=%s,new_count=%s,skipped_existing=%s,updated=%s,regrouped_samples=%s,duration_seconds=%s WHERE id=%s",("partial" if totals["failed"] else "success",totals["discovered"],totals["ingested"],totals["failed"],totals["new"],totals["skipped_existing"],totals["updated"],totals["regrouped_samples"],duration,batch))
                 cur.execute("UPDATE collector_status SET state=%s,last_success_at=now(),connectivity_ok=true,lag_seconds=%s,error_count=error_count+%s,last_cycle_duration_seconds=%s,last_discovered=%s,last_new=%s,last_skipped_existing=%s,last_updated=%s,last_failed=%s,last_regrouped_samples=%s,message=%s WHERE singleton",("degraded" if totals["failed"] else "healthy",int((now-newest).total_seconds()) if newest else None,totals["failed"],duration,totals["discovered"],totals["new"],totals["skipped_existing"],totals["updated"],totals["failed"],totals["regrouped_samples"],f"New {totals['ingested']}; skipped {totals['skipped_existing']}; regrouped samples {totals['regrouped_samples']}"));conn.commit()
             log.info("collection complete %s duration=%.2fs",totals,duration);return {"lock_acquired":True,**totals,"duration_seconds":duration}
+        except Exception:
+            duration=time.monotonic()-started
+            if batch is not None:
+                try:
+                    with connection() as conn,conn.cursor() as cur:
+                        cur.execute("UPDATE ingestion_batches SET completed_at=now(),status='error',failed=GREATEST(failed,1),duration_seconds=%s WHERE id=%s",(duration,batch));conn.commit()
+                except Exception as batch_error:log.error("unable to finalize failed ingestion batch: %s",type(batch_error).__name__)
+            raise
         finally:
             if client:await client.close()
             with lock_conn.cursor() as cur:cur.execute("SELECT pg_advisory_unlock(%s)",(COLLECTOR_LOCK_ID,))
