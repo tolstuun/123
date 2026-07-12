@@ -1,4 +1,3 @@
-import hashlib
 import ipaddress
 import json
 import ntpath
@@ -89,7 +88,3 @@ def compare_vtis(before, after):
         "score_increased": [(left[k], right[k]) for k in left.keys() & right.keys() if (right[k].get("score") or 0) > (left[k].get("score") or 0)],
         "score_decreased": [(left[k], right[k]) for k in left.keys() & right.keys() if (right[k].get("score") or 0) < (left[k].get("score") or 0)],
     }
-
-
-def payload_digest(payload):
-    return hashlib.sha256(payload).hexdigest()

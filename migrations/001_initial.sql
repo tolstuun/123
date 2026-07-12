@@ -17,12 +17,6 @@ CREATE TABLE sample_analysis_groups (
 CREATE INDEX groups_sample_idx ON sample_analysis_groups(sample_id);
 
 CREATE TABLE ingestion_batches (id bigserial PRIMARY KEY, started_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz, status text NOT NULL, discovered int NOT NULL DEFAULT 0, ingested int NOT NULL DEFAULT 0, failed int NOT NULL DEFAULT 0);
-CREATE TABLE raw_api_payloads (
- id bigserial PRIMARY KEY, source_kind text NOT NULL, source_identifier text NOT NULL, content_type text NOT NULL,
- content_encoding text NOT NULL DEFAULT 'gzip', payload bytea NOT NULL, sha256 char(64) NOT NULL, collected_at timestamptz NOT NULL DEFAULT now(),
- UNIQUE(source_kind, source_identifier, sha256)
-);
-
 CREATE TABLE analysis_runs (
  id bigserial PRIMARY KEY, group_id bigint NOT NULL REFERENCES sample_analysis_groups(id), sample_id bigint NOT NULL REFERENCES samples(id),
  vmray_analysis_id bigint NOT NULL, vmray_sample_id bigint, vmray_submission_id bigint, vmray_job_id bigint,
@@ -31,7 +25,7 @@ CREATE TABLE analysis_runs (
  created_at timestamptz, started_at timestamptz, completed_at timestamptz, ingested_at timestamptz NOT NULL DEFAULT now(),
  vmray_version text, analysis_configuration jsonb, target_environment text, status text, failure_state text,
  verdict text NOT NULL, original_verdict text, verdict_score numeric, verdict_reason text, support_classification text NOT NULL DEFAULT 'none',
- grouping_confidence text NOT NULL, is_demo boolean NOT NULL DEFAULT false, raw_payload_id bigint REFERENCES raw_api_payloads(id), parser_version text NOT NULL REFERENCES schema_parser_versions(version),
+ grouping_confidence text NOT NULL, is_demo boolean NOT NULL DEFAULT false, parser_version text NOT NULL REFERENCES schema_parser_versions(version),
  UNIQUE(vmray_analysis_id, is_demo)
 );
 CREATE INDEX runs_group_idx ON analysis_runs(group_id); CREATE INDEX runs_completed_idx ON analysis_runs(completed_at); CREATE INDEX runs_dimensions_idx ON analysis_runs(is_demo, analysis_type, duration_bucket, verdict);

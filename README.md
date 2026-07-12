@@ -1,6 +1,6 @@
 # VMRay Analytics Platform
 
-Production-oriented preservation and analytics for VMRay's short-lived analysis results. It retains immutable static repetitions, dynamic 60/120/180-second runs, raw source payloads, verdict support, VTI observations, and per-analysis IOC snapshots in PostgreSQL.
+Production-oriented analytics for VMRay's short-lived analysis results. It retains normalized immutable static repetitions, dynamic 60/120/180-second runs, verdict observations, and VTI observations in PostgreSQL. Raw API responses and full analysis archives are not downloaded or retained.
 
 ## Local operation
 

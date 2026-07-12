@@ -21,7 +21,7 @@ Verified on 2026-07-11 against the configured on-premises server using read-only
 | GET | `/rest/sample/{sample_id}/iocs?all_artifacts=true` | Sample IOC data |
 | GET | `/rest/sample/{sample_id}/iocs/csv?all_artifacts=true` | IOC CSV |
 
-The archive endpoint ignored a byte Range request and returned a complete ZIP. Collection therefore fetches an archive only once for a newly completed run, never as a polling mechanism.
+The archive endpoint ignored a byte Range request and returned a complete ZIP. The production collector therefore does not call this endpoint.
 
 ## Listing, filtering, sorting, and pagination
 
@@ -51,7 +51,7 @@ Completed live rows had `analysis_result_code=1` and `analysis_result_str="Opera
 
 ## IOC representation
 
-Sample IOC JSON and CSV endpoints are available. The analysis archive contains `report/artifacts/all_iocs.csv` plus typed IOC CSV files and STIX reports. Because the direct IOC endpoint is sample-scoped, immutable analysis-level IOC snapshots are taken from each newly downloaded analysis archive when present; sample IOC data is retained as source material but is not silently treated as run-specific.
+Sample IOC JSON and CSV endpoints are available. The analysis archive contains `report/artifacts/all_iocs.csv` plus typed IOC CSV files and STIX reports. IOC acquisition is outside the current collector scope because full archives are not downloaded.
 
 ## Live differences and ambiguities
 
@@ -64,4 +64,4 @@ Sample IOC JSON and CSV endpoints are available. The analysis archive contains `
 
 ## Safe polling strategy
 
-Poll every `VMRAY_POLL_INTERVAL_SECONDS` (default 300), query a six-hour overlap from the durable completion timestamp checkpoint, page newest-first with inclusive `_max_id`, and upsert immutable observations by stable API identifiers. Raw detail, VTI, archive/IOC source material is stored before normalization. Transient failures retry with jitter; permanent per-analysis failures are recorded and do not advance beyond an unsafe gap.
+Poll every `VMRAY_POLL_INTERVAL_SECONDS` (default 300), query a six-hour overlap from the durable completion timestamp checkpoint, page newest-first with inclusive `_max_id`, and upsert normalized immutable observations by stable API identifiers. API responses are discarded after normalization and archives are never requested. Transient failures retry with jitter; permanent per-analysis failures are recorded and do not advance beyond an unsafe gap.

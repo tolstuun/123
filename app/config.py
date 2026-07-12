@@ -16,7 +16,6 @@ class Settings:
     overlap_hours: int = int(os.getenv("VMRAY_OVERLAP_HOURS", "6"))
     logical_group_max_gap_seconds: int = int(os.getenv("LOGICAL_GROUP_MAX_GAP_SECONDS", "300"))
     logical_group_settling_seconds: int = int(os.getenv("LOGICAL_GROUP_SETTLING_SECONDS", "900"))
-    fetch_analysis_archives: bool = _bool("VMRAY_FETCH_ANALYSIS_ARCHIVES", False)
     dashboard_username: str = os.getenv("DASHBOARD_USERNAME", "")
     dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "")
     environment: str = os.getenv("APP_ENV", "production")
