@@ -24,11 +24,11 @@ WITH selected_groups AS (
     SELECT group_id,'Static' run_kind,
            CASE WHEN count(DISTINCT verdict)=1 THEN min(verdict) ELSE 'mixed' END verdict,
            bool_or(has_av) has_av,bool_or(has_yara) has_yara,bool_or(has_behavioral) has_behavioral
-    FROM run_evidence WHERE expected_slot LIKE 'static_%' GROUP BY group_id
+    FROM run_evidence WHERE expected_slot LIKE 'static_%%' GROUP BY group_id
     UNION ALL
     SELECT group_id,CASE expected_slot WHEN 'dynamic_60' THEN 'Dynamic 60s' WHEN 'dynamic_120' THEN 'Dynamic 120s' ELSE 'Dynamic 180s' END,
            verdict,has_av,has_yara,has_behavioral
-    FROM run_evidence WHERE expected_slot LIKE 'dynamic_%'
+    FROM run_evidence WHERE expected_slot LIKE 'dynamic_%%'
 )
 SELECT group_id,run_kind,verdict,
        CASE WHEN has_behavioral THEN 'behavioral'
