@@ -91,16 +91,31 @@ def integrity(proposals,runs,unassigned):
 def apply_proposals(proposals,runs,sample_ids=None):
     now=datetime.now(timezone.utc); proposed_keys={p.group_key for p in proposals}
     with connection() as conn,conn.cursor() as cur:
+        run_ids=[r["id"] for r in runs]
+        cur.execute("SELECT analysis_run_id FROM source_submission_group_runs WHERE analysis_run_id=ANY(%s)",(run_ids or [0],)); sourced={row["analysis_run_id"] for row in cur.fetchall()}
         for run in runs:
+            if run["id"] in sourced:continue
             submission=run["vmray_submission_id"]
             source_key=f"sample:{run['sample_id']}:submission:{submission}" if submission is not None else f"sample:{run['sample_id']}:analysis:{run['vmray_analysis_id']}"
             cur.execute("INSERT INTO source_submission_groups(sample_id,vmray_submission_id,source_key,first_analysis_at,last_analysis_at) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(source_key) DO UPDATE SET first_analysis_at=LEAST(source_submission_groups.first_analysis_at,EXCLUDED.first_analysis_at),last_analysis_at=GREATEST(source_submission_groups.last_analysis_at,EXCLUDED.last_analysis_at) RETURNING id",(run["sample_id"],submission,source_key,timestamp(run),timestamp(run))); source_id=cur.fetchone()["id"]
             cur.execute("INSERT INTO source_submission_group_runs(source_submission_group_id,analysis_run_id) VALUES(%s,%s) ON CONFLICT(analysis_run_id) DO NOTHING",(source_id,run["id"]))
         target_samples=sorted({r["sample_id"] for r in runs})
-        if target_samples:
-            cur.execute("DELETE FROM logical_experiment_group_runs WHERE logical_experiment_group_id IN(SELECT id FROM logical_experiment_groups WHERE sample_id=ANY(%s) AND grouping_version=%s)",(target_samples,GROUPING_VERSION))
-            cur.execute("UPDATE analysis_runs SET static_repetition=NULL WHERE sample_id=ANY(%s) AND analysis_type='static'",(target_samples,))
+        cur.execute("SELECT g.group_key,l.analysis_run_id,l.expected_slot FROM logical_experiment_groups g JOIN logical_experiment_group_runs l ON l.logical_experiment_group_id=g.id WHERE g.sample_id=ANY(%s) AND g.grouping_version=%s",(target_samples or [0],GROUPING_VERSION))
+        existing_by_key=defaultdict(set)
+        for row in cur.fetchall():existing_by_key[row["group_key"]].add((row["analysis_run_id"],row["expected_slot"]))
+        proposed_by_key={p.group_key:{(run["id"],slot) for run,slot in p.assignments} for p in proposals}
+        if dict(existing_by_key)==proposed_by_key:
+            conn.commit();return False
+        unchanged={key for key in proposed_keys if existing_by_key.get(key)==proposed_by_key[key]}
+        changed_existing=set(existing_by_key)-unchanged
+        changed_run_ids={run_id for key in changed_existing for run_id,_ in existing_by_key[key]}
+        changed_run_ids.update(run_id for key in proposed_keys-unchanged for run_id,_ in proposed_by_key[key])
+        if changed_existing:
+            cur.execute("DELETE FROM logical_experiment_group_runs WHERE logical_experiment_group_id IN(SELECT id FROM logical_experiment_groups WHERE group_key=ANY(%s))",(list(changed_existing),))
+        if changed_run_ids:
+            cur.execute("UPDATE analysis_runs SET static_repetition=NULL WHERE id=ANY(%s) AND analysis_type='static'",(list(changed_run_ids),))
         for proposal in proposals:
+            if proposal.group_key in unchanged:continue
             complete=len(proposal.assignments)==6 and not proposal.ambiguity
             settled=(now-proposal.last_at).total_seconds()>=settings.logical_group_settling_seconds
             explanation=f"Same SHA-256; analysis start timestamps within {settings.logical_group_max_gap_seconds}s; exact slot capacity enforced."
@@ -110,16 +125,19 @@ def apply_proposals(proposals,runs,sample_ids=None):
                 if slot.startswith("static_"):cur.execute("UPDATE analysis_runs SET static_repetition=%s WHERE id=%s",(int(slot[-1]),run["id"]))
         if target_samples:
             cur.execute("DELETE FROM logical_experiment_groups WHERE sample_id=ANY(%s) AND grouping_version=%s AND NOT(group_key=ANY(%s))",(target_samples,GROUPING_VERSION,list(proposed_keys) or [""]))
-        conn.commit()
+        conn.commit();return True
 
 
 def regroup(dry_run=True,sample_ids=None):
     migrate();runs=load_runs(sample_ids);proposals,unassigned=build_proposals(runs,settings.logical_group_max_gap_seconds);integrity(proposals,runs,unassigned);report=summarize(proposals,unassigned,len(runs))
-    if not dry_run:apply_proposals(proposals,runs,sample_ids)
+    if not dry_run:report["changed"]=apply_proposals(proposals,runs,sample_ids)
     return report
 
 
-def regroup_sample(sample_id):return regroup(False,[sample_id])
+def regroup_samples(sample_ids):return regroup(False,sample_ids)
+
+
+def regroup_sample(sample_id):return regroup_samples([sample_id])
 
 
 if __name__=="__main__":

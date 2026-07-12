@@ -21,6 +21,7 @@ services:
       VMRAY_API_KEY: ${VMRAY_API_KEY}
       VMRAY_VERIFY_TLS: ${VMRAY_VERIFY_TLS:-true}
       VMRAY_POLL_INTERVAL_SECONDS: ${VMRAY_POLL_INTERVAL_SECONDS:-300}
+      VMRAY_FETCH_ANALYSIS_ARCHIVES: ${VMRAY_FETCH_ANALYSIS_ARCHIVES:-false}
     depends_on: {db: {condition: service_healthy}}
     restart: "no"
   web:
@@ -34,7 +35,9 @@ services:
     build: .
     command: [python, -m, app.collector, run]
     environment: *app-env
-    depends_on: {migrate: {condition: service_completed_successfully}}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      web: {condition: service_healthy}
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
   proxy:

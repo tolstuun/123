@@ -8,6 +8,16 @@
   <div><strong>{{ recent_errors }}</strong><small>Ingestion errors · 24h</small></div>
   <div><strong>{{ mode|title }}</strong><small>Data mode</small></div>
 </section>
+<section class="cycle-telemetry" aria-label="Latest collection cycle">
+  <span>Latest cycle</span>
+  <strong>{{ human_duration(collector.last_cycle_duration_seconds) }}</strong>
+  <span>Discovered <b>{{ collector.last_discovered }}</b></span>
+  <span>New <b>{{ collector.last_new }}</b></span>
+  <span>Skipped existing <b>{{ collector.last_skipped_existing }}</b></span>
+  <span>Updated <b>{{ collector.last_updated }}</b></span>
+  <span>Failed <b>{{ collector.last_failed }}</b></span>
+  <span>Regrouped samples <b>{{ collector.last_regrouped_samples }}</b></span>
+</section>
 
 <section class="kpi-grid" aria-label="Overview metrics">
   <article title="Distinct sample records identified by SHA-256 in the selected range"><span>Unique sample hashes</span><strong>{{ metrics.unique_samples }}</strong></article>

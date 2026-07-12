@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - 2026-07-12
+
+- Made overlap collection skip fully imported analyses, batch logical regrouping once per changed sample, added cycle locking/telemetry, eliminated unchanged grouping writes, and disabled automatic large archive retention.
+
 ## 1.1.0 - 2026-07-11
 
 - Separated VMRay submission provenance from logical experiment cycles and safely reconstructed production using deterministic start-time clustering.

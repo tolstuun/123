@@ -85,6 +85,19 @@ button { padding: 9px 15px; border: 0; border-radius: 7px; background: var(--tea
 .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--orange); }
 .status-dot.healthy, .status-dot.running { background: var(--teal); box-shadow: 0 0 8px #48e2c277; }
 .status-dot.error, .status-dot.degraded { background: var(--red); }
+.cycle-telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  margin: -4px 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.cycle-telemetry strong, .cycle-telemetry b { color: var(--ink); }
 
 /* KPI cards */
 .kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 9px; margin-bottom: 12px; }
