@@ -151,6 +151,19 @@ button { padding: 9px 15px; border: 0; border-radius: 7px; background: var(--tea
 .verdict-benign { fill: var(--green); background: var(--green); }
 .verdict-unknown { fill: #657b7e; background: #657b7e; }
 .verdict-failed { fill: #a94e9b; background: #a94e9b; }
+.verdict-mixed { fill: #d7b85c; background: #d7b85c; }
+.support-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.support-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.support-card { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #0a1416; }
+.support-card h3 { margin: 0 0 10px; font-size: 12px; }
+.support-highlight { display: grid; gap: 3px; padding: 10px; border-radius: 7px; background: #12312e; }
+.support-highlight span { color: var(--teal); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.support-highlight strong { font-size: 23px; }
+.support-highlight small { color: var(--muted); }
+.support-card dl { display: grid; grid-template-columns: 1fr auto; gap: 7px 10px; margin: 12px 0 0; }
+.support-card dt { color: var(--muted); font-size: 10px; }
+.support-card dd { margin: 0; font-size: 10px; }
+.support-card dd span { color: var(--muted); margin-left: 4px; }
 .missing-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 13px; }
 .missing-list div { display: flex; justify-content: space-between; padding: 9px 10px; border-radius: 6px; background: #0a1416; }
 .missing-list span { color: var(--muted); font-size: 11px; }
@@ -213,4 +226,5 @@ td, th { padding: 9px; border-bottom: 1px solid var(--line); vertical-align: top
   .six-slot-grid { grid-template-columns: 1fr; }
   .panel-head, .sample-head, .group-heading { flex-direction: column; }
   .missing-list { grid-template-columns: 1fr; }
+  .support-grid { grid-template-columns: 1fr; }
 }

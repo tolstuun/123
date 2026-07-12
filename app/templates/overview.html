@@ -77,11 +77,28 @@
   </article>
 
   <article class="panel chart-panel">
-    <div class="panel-head"><div><h2>Verdict distribution</h2><p>Verdicts by expected run type.</p></div></div>
+    <div class="panel-head"><div><h2>Verdict distribution by logical experiment</h2><p title="Static represents one combined result from three static repetitions. Dynamic durations represent one run per logical experiment.">One result per logical experiment and run type. ⓘ</p></div></div>
     <div class="verdict-matrix">
       {% for row in verdict_matrix %}<div class="verdict-row"><strong>{{ row.kind }}</strong><svg viewBox="0 0 400 30" role="img" aria-label="{{ row.kind }} verdicts, {{ row.total }} total"><rect width="400" height="22" y="4" class="matrix-bg"/>{% set ns=namespace(x=0) %}{% for category in verdict_categories %}{% set width=(row.counts[category]/row.total*400) if row.total else 0 %}<rect x="{{ ns.x }}" y="4" width="{{ width }}" height="22" class="verdict-{{ category }}"><title>{{ category|title }}: {{ row.counts[category] }}</title></rect>{% set ns.x=ns.x+width %}{% endfor %}</svg><span>{{ row.total }}</span></div>{% endfor %}
     </div>
     <div class="legend">{% for category in verdict_categories %}<span><i class="verdict-{{ category }}"></i>{{ category|title }}</span>{% endfor %}</div>
+
+    <section class="support-section" aria-labelledby="support-title">
+      <div class="panel-head"><div><h2 id="support-title">High-confidence detection support</h2><p>VTI scores 3–5; Static combines evidence across its three repetitions.</p></div></div>
+      <div class="support-grid">
+        {% for row in support_matrix %}
+        <article class="support-card">
+          <h3>{{ row.kind }}</h3>
+          <div class="support-highlight"><span>AV/YARA-only detections</span><strong>{{ row.av_yara_only }}</strong><small>{{ '%.1f'|format(row.av_yara_only / row.total * 100 if row.total else 0) }}% of {{ row.total }} logical results</small><small>{{ row.av_yara_malicious }} malicious · {{ row.av_yara_suspicious }} suspicious</small></div>
+          <dl>
+            {% for key,label in [('av_only','AV only'),('yara_only','YARA only'),('av_yara_only','AV + YARA only'),('behavioral','Behavioral present'),('none','No high-confidence VTI')] %}
+            <dt>{{ label }}</dt><dd><strong>{{ row.support[key] }}</strong> <span>{{ '%.1f'|format(row.support[key] / row.total * 100 if row.total else 0) }}%</span></dd>
+            {% endfor %}
+          </dl>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
   </article>
 
   <article class="panel">

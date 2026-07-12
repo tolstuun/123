@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .db import connection, open_pool
 from .migrate import migrate
-from .analytics import EXPECTED_SLOTS, zero_fill_daily
+from .analytics import EXPECTED_SLOTS, VERDICT_CATEGORIES, fetch_logical_results, summarize_logical_results, zero_fill_daily
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
 templates=Jinja2Templates(directory="app/templates"); app.mount("/static",StaticFiles(directory="app/static"),name="static"); security=HTTPBasic()
@@ -84,15 +84,13 @@ def overview(request:Request):
         else:
             cur.execute(f"SELECT first_analysis_at::date AS \"day\",count(*) total FROM logical_experiment_groups g WHERE {group_where} AND first_analysis_at>=%s GROUP BY 1 ORDER BY 1",group_args+(start,)); raw_daily=cur.fetchall(); keys=("total",)
         daily=zero_fill_daily(start.date(),end,raw_daily,keys)
-        cur.execute(f"SELECT CASE WHEN analysis_type='static' THEN 'Static' WHEN duration_bucket=60 THEN 'Dynamic 60s' WHEN duration_bucket=120 THEN 'Dynamic 120s' WHEN duration_bucket=180 THEN 'Dynamic 180s' ELSE 'Other' END run_kind,verdict,count(*) count FROM analysis_runs r WHERE {where} AND completed_at>=%s AND (analysis_type='static' OR duration_bucket IN(60,120,180)) GROUP BY 1,2 ORDER BY 1,2",args+(start,)); verdicts=cur.fetchall()
+        logical_results=fetch_logical_results(cur,mode,start)
         cur.execute("SELECT * FROM collector_status WHERE singleton"); collector=cur.fetchone()
         cur.execute("SELECT count(*) count FROM collection_errors WHERE occurred_at>=now()-interval '24 hours'"); recent_errors=cur.fetchone()["count"]
     chart_max=max([sum(row[key] for key in keys) for row in daily] or [1]); chart_max=max(chart_max,1)
-    verdict_categories=("malicious","suspicious","benign","unknown","failed"); verdict_kinds=("Static","Dynamic 60s","Dynamic 120s","Dynamic 180s")
-    verdict_lookup={(row["run_kind"],row["verdict"]):row["count"] for row in verdicts}
-    verdict_matrix=[{"kind":kind,"counts":{category:verdict_lookup.get((kind,category),0) for category in verdict_categories}} for kind in verdict_kinds]
-    for row in verdict_matrix:row["total"]=sum(row["counts"].values())
-    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"chart_max":chart_max,"metric":metric,"verdict_matrix":verdict_matrix,"verdict_categories":verdict_categories,"collector":collector,"missing":missing,"recent_errors":recent_errors})
+    logical_summary=summarize_logical_results(logical_results)
+    verdict_matrix=[{"kind":row["kind"],"counts":row["verdicts"],"total":row["total"]} for row in logical_summary]
+    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"chart_max":chart_max,"metric":metric,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":logical_summary,"collector":collector,"missing":missing,"recent_errors":recent_errors})
 
 
 @app.get("/groups/incomplete",response_class=HTMLResponse,dependencies=[Depends(auth)])
