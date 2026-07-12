@@ -20,7 +20,7 @@ evidence AS (
  FROM selected CROSS JOIN kinds k
  LEFT JOIN analysis_runs r ON r.sample_id=selected.id AND ((k.kind='Static' AND r.analysis_type='static') OR (k.kind='Dynamic 60s' AND r.analysis_type='dynamic' AND r.duration_bucket=60) OR (k.kind='Dynamic 120s' AND r.analysis_type='dynamic' AND r.duration_bucket=120) OR (k.kind='Dynamic 180s' AND r.analysis_type='dynamic' AND r.duration_bucket=180))
  LEFT JOIN vti_observations o ON o.analysis_run_id=r.id LEFT JOIN vti_definitions d ON d.id=o.vti_definition_id
- GROUP BY selected.id,k.kind,verdict
+ GROUP BY selected.id,k.kind,selected.static_verdict,selected.dynamic_60_verdict,selected.dynamic_120_verdict,selected.dynamic_180_verdict
 )
 SELECT sample_id,kind run_kind,verdict,
  CASE WHEN run_count=0 THEN 'missing' WHEN has_behavioral THEN 'behavioral' WHEN has_av AND has_yara THEN 'av_yara_only' WHEN has_av THEN 'av_only' WHEN has_yara THEN 'yara_only' ELSE 'none' END support
