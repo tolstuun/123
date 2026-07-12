@@ -1,17 +1,1 @@
-{% extends "base.html" %}{% block content %}
-<section class="sample-head"><div><p class="eyebrow">SHA-256</p><code>{{ sample.sha256 }}</code><h2>{{ sample.filename or 'Unnamed sample' }}</h2></div><span class="badge">{{ 'DEMO DATA' if sample.is_demo else 'REAL DATA' }}</span></section>
-{% for group in groups %}
-<section class="group-section">
-  <div class="group-heading"><div><p class="eyebrow">Logical experiment cycle #{{ group.id }}</p><h2>{{ group.expected_slots_present }}/6 expected slots · {{ group.completeness_status|replace('_',' ')|title }}</h2></div><span class="confidence">{{ group.grouping_confidence }} confidence · {{ group.grouping_method|replace('_',' ') }}</span></div>
-  <p class="group-explanation">{{ group.grouping_explanation }} · {{ group.source_submission_count }} source submission(s) · {{ human_duration(group.experiment_span_seconds) }} span.</p>
-  {% if group.ambiguity_flag %}<p class="warning">⚠ Competing candidates were detected; lower-confidence assignments are explicitly marked.</p>{% endif %}
-  <div class="six-slot-grid">
-  {% for slot in expected_slots %}<article class="run-card {% if not group.slots[slot] %}slot-missing{% endif %}"><div class="run-title"><span>{{ slot|replace('_',' ')|title }}</span><span class="slot-state">{{ group.slots[slot]|length if group.slots[slot] else 'Missing' }}</span></div>
-    {% for r in group.slots[slot] %}<div class="run-observation"><span class="pill {{ r.verdict }}">{{ r.verdict }}</span><dl><dt>Verdict score</dt><dd>{{ r.verdict_score or '—' }}</dd><dt>Status</dt><dd>{{ r.status or '—' }}</dd><dt>Requested / actual</dt><dd>{{ r.requested_duration_seconds or '—' }} / {{ r.actual_duration_seconds or '—' }} sec</dd><dt>Source submission ID</dt><dd>{{ r.vmray_submission_id or '—' }}</dd><dt>VTI / high confidence</dt><dd>{{ r.vti_count }} / {{ r.high_vti_count }}</dd><dt>IOC / actionable</dt><dd>{{ r.ioc_count }} / {{ r.actionable_ioc_count }}</dd><dt>Analysis ID</dt><dd>{{ r.vmray_analysis_id }}</dd><dt>Completed</dt><dd>{{ human_time(r.completed_at) }}</dd></dl></div>{% endfor %}
-  </article>{% endfor %}
-  </div>
-  {% if group.unmapped_runs %}<h3>Unmapped runs</h3><div class="unmapped-list">{% for r in group.unmapped_runs %}<span>Analysis {{ r.vmray_analysis_id }} · {{ r.analysis_type }} · {{ r.duration_bucket or 'no duration' }}</span>{% endfor %}</div>{% endif %}
-</section>
-{% else %}<p class="empty">No logical analysis groups collected for this sample.</p>{% endfor %}
-{% if unassigned %}<section class="group-section"><h2>Unassigned analyses</h2><p class="warning">These retained source analyses could not be assigned safely to a logical experiment.</p><div class="unmapped-list">{% for r in unassigned %}<span>Analysis {{ r.vmray_analysis_id }} · submission {{ r.vmray_submission_id or '—' }} · {{ r.analysis_type }} {{ r.duration_bucket or '' }}</span>{% endfor %}</div></section>{% endif %}
-{% endblock %}
+{% extends "base.html" %}{% block content %}<section class="sample-head"><div><code>{{ sample.sha256 }}</code><h2>{{ sample.filename or 'Unnamed sample' }}</h2></div></section>{% for heading,runs in sections.items() %}<section class="group-section"><h2>{{ heading }}</h2><div class="six-slot-grid">{% for r in runs %}<article class="run-card"><div class="run-title"><span>Analysis {{ r.vmray_analysis_id }}</span><span class="pill {{ r.verdict }}">{{ r.verdict }}</span></div><dl><dt>Status</dt><dd>{{ r.status or '—' }}</dd><dt>Submission / job</dt><dd>{{ r.vmray_submission_id or '—' }} / {{ r.vmray_job_id or '—' }}</dd><dt>VTI</dt><dd>{{ r.vti_count }}</dd><dt>Completed</dt><dd>{{ human_time(r.completed_at) }}</dd></dl></article>{% else %}<p class="empty">No matching analyses.</p>{% endfor %}</div></section>{% endfor %}{% endblock %}

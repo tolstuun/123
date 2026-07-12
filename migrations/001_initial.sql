@@ -9,26 +9,19 @@ CREATE TABLE samples (
 );
 CREATE INDEX samples_hashes_idx ON samples(sha1, md5); CREATE INDEX samples_filename_idx ON samples(lower(filename));
 
-CREATE TABLE sample_analysis_groups (
- id bigserial PRIMARY KEY, sample_id bigint NOT NULL REFERENCES samples(id), grouping_key text NOT NULL,
- vmray_submission_id bigint, grouping_confidence text NOT NULL CHECK(grouping_confidence IN ('high','medium','ambiguous')),
- grouping_warning text, created_at timestamptz NOT NULL, is_demo boolean NOT NULL DEFAULT false, UNIQUE(grouping_key, is_demo)
-);
-CREATE INDEX groups_sample_idx ON sample_analysis_groups(sample_id);
-
 CREATE TABLE ingestion_batches (id bigserial PRIMARY KEY, started_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz, status text NOT NULL, discovered int NOT NULL DEFAULT 0, ingested int NOT NULL DEFAULT 0, failed int NOT NULL DEFAULT 0);
 CREATE TABLE analysis_runs (
- id bigserial PRIMARY KEY, group_id bigint NOT NULL REFERENCES sample_analysis_groups(id), sample_id bigint NOT NULL REFERENCES samples(id),
+ id bigserial PRIMARY KEY, sample_id bigint NOT NULL REFERENCES samples(id),
  vmray_analysis_id bigint NOT NULL, vmray_sample_id bigint, vmray_submission_id bigint, vmray_job_id bigint,
- analysis_type text NOT NULL CHECK(analysis_type IN ('static','dynamic','unknown')), static_repetition smallint,
+ analysis_type text NOT NULL CHECK(analysis_type IN ('static','dynamic','unknown')),
  requested_duration_seconds int, actual_duration_seconds int, duration_bucket smallint,
  created_at timestamptz, started_at timestamptz, completed_at timestamptz, ingested_at timestamptz NOT NULL DEFAULT now(),
  vmray_version text, analysis_configuration jsonb, target_environment text, status text, failure_state text,
  verdict text NOT NULL, original_verdict text, verdict_score numeric, verdict_reason text, support_classification text NOT NULL DEFAULT 'none',
- grouping_confidence text NOT NULL, is_demo boolean NOT NULL DEFAULT false, parser_version text NOT NULL REFERENCES schema_parser_versions(version),
+ is_demo boolean NOT NULL DEFAULT false, parser_version text NOT NULL REFERENCES schema_parser_versions(version),
  UNIQUE(vmray_analysis_id, is_demo)
 );
-CREATE INDEX runs_group_idx ON analysis_runs(group_id); CREATE INDEX runs_completed_idx ON analysis_runs(completed_at); CREATE INDEX runs_dimensions_idx ON analysis_runs(is_demo, analysis_type, duration_bucket, verdict);
+CREATE INDEX runs_completed_idx ON analysis_runs(completed_at); CREATE INDEX runs_dimensions_idx ON analysis_runs(is_demo, analysis_type, duration_bucket, verdict);
 
 CREATE TABLE verdict_observations (id bigserial PRIMARY KEY, analysis_run_id bigint NOT NULL UNIQUE REFERENCES analysis_runs(id) ON DELETE CASCADE, normalized_verdict text NOT NULL, original_value text, score numeric, reason_code text, reason_description text, observed_at timestamptz NOT NULL);
 CREATE TABLE vti_definitions (id bigserial PRIMARY KEY, stable_id text NOT NULL UNIQUE, category text, operation text, description text, classifications jsonb NOT NULL DEFAULT '[]');

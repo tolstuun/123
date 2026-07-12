@@ -14,8 +14,6 @@ class Settings:
     vmray_verify_tls: bool = _bool("VMRAY_VERIFY_TLS", True)
     poll_seconds: int = int(os.getenv("VMRAY_POLL_INTERVAL_SECONDS", "300"))
     overlap_hours: int = int(os.getenv("VMRAY_OVERLAP_HOURS", "6"))
-    logical_group_max_gap_seconds: int = int(os.getenv("LOGICAL_GROUP_MAX_GAP_SECONDS", "300"))
-    logical_group_settling_seconds: int = int(os.getenv("LOGICAL_GROUP_SETTLING_SECONDS", "900"))
     dashboard_username: str = os.getenv("DASHBOARD_USERNAME", "")
     dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "")
     environment: str = os.getenv("APP_ENV", "production")

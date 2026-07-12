@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .db import connection, open_pool
 from .migrate import migrate
-from .analytics import EXPECTED_SLOTS, VERDICT_CATEGORIES, fetch_logical_results, summarize_logical_results, zero_fill_daily
+from .analytics import VERDICT_CATEGORIES, fetch_sample_results, summarize_sample_results, zero_fill_daily
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
 templates=Jinja2Templates(directory="app/templates"); app.mount("/static",StaticFiles(directory="app/static"),name="static"); security=HTTPBasic()
@@ -69,45 +69,31 @@ templates.env.globals.update(human_time=human_time,human_duration=human_duration
 
 @app.get("/",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def overview(request:Request):
-    mode,start,days=filters(request); where,args=mode_sql(mode); metric=request.query_params.get("metric","runs"); metric=metric if metric in {"runs","samples","groups"} else "runs"; end=datetime.now(timezone.utc).date()
+    mode,start,days=filters(request); where,args=mode_sql(mode); metric=request.query_params.get("metric","runs"); metric=metric if metric in {"runs","samples"} else "runs"; end=datetime.now(timezone.utc).date()
     with connection() as conn,conn.cursor() as cur:
         cur.execute(f"SELECT count(*) analyses,count(DISTINCT sample_id) unique_samples,count(*) FILTER(WHERE analysis_type='static') static_analyses,count(*) FILTER(WHERE analysis_type='dynamic') dynamic_analyses,count(*) FILTER(WHERE completed_at>=date_trunc('day',now())) analyses_today FROM analysis_runs r WHERE {where} AND completed_at>=%s",args+(start,)); metrics=cur.fetchone()
         sample_where,sample_args=mode_sql(mode,"s"); cur.execute(f"SELECT count(*) FILTER(WHERE first_seen>=date_trunc('day',now())) samples_first_seen_today FROM samples s WHERE {sample_where}",sample_args); metrics.update(cur.fetchone())
-        group_where,group_args=mode_sql(mode,"g"); cur.execute(f"SELECT count(*) logical_groups,count(*) FILTER(WHERE c.completeness_status='complete_clean') complete_groups,count(*) FILTER(WHERE c.missing_slot_count>0) incomplete_groups,count(*) FILTER(WHERE c.ambiguity_flag) ambiguous_groups FROM analysis_group_completeness c JOIN logical_experiment_groups g ON g.id=c.group_id WHERE {group_where} AND c.last_analysis_at>=%s",group_args+(start,)); metrics.update(cur.fetchone())
-        cur.execute(f"SELECT count(*) unassigned_analyses FROM unassigned_analysis_runs r WHERE {where} AND completed_at>=%s",args+(start,)); metrics.update(cur.fetchone())
-        cur.execute(f"SELECT count(*) source_submission_groups FROM source_submission_groups sg JOIN samples s ON s.id=sg.sample_id WHERE {sample_where}",sample_args); metrics.update(cur.fetchone())
-        cur.execute(f"SELECT slot,count(*) count FROM analysis_group_completeness c JOIN logical_experiment_groups g ON g.id=c.group_id CROSS JOIN LATERAL unnest(c.missing_slots) slot WHERE {group_where} AND c.last_analysis_at>=%s GROUP BY slot ORDER BY slot",group_args+(start,)); missing={row["slot"]:row["count"] for row in cur.fetchall()}
+        cur.execute(f"SELECT count(*) unique_samples,count(*) FILTER(WHERE sas.static_count=0) missing_static,count(*) FILTER(WHERE sas.dynamic_60_count=0) missing_60,count(*) FILTER(WHERE sas.dynamic_120_count=0) missing_120,count(*) FILTER(WHERE sas.dynamic_180_count=0) missing_180 FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE {sample_where} AND s.latest_seen>=%s",sample_args+(start,)); metrics.update(cur.fetchone())
         if metric=="runs":
-            cur.execute(f"SELECT completed_at::date AS \"day\",count(*) FILTER(WHERE analysis_type='static' AND static_repetition IN(1,2,3)) static,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=60) dynamic_60,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=120) dynamic_120,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=180) dynamic_180,count(*) FILTER(WHERE NOT ((analysis_type='static' AND static_repetition IN(1,2,3)) OR (analysis_type='dynamic' AND duration_bucket IN(60,120,180)))) other FROM analysis_runs r WHERE {where} AND completed_at>=%s GROUP BY 1 ORDER BY 1",args+(start,)); raw_daily=cur.fetchall(); keys=("static","dynamic_60","dynamic_120","dynamic_180","other")
+            cur.execute(f"SELECT completed_at::date AS \"day\",count(*) FILTER(WHERE analysis_type='static') static,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=60) dynamic_60,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=120) dynamic_120,count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket=180) dynamic_180,count(*) FILTER(WHERE NOT (analysis_type='static' OR (analysis_type='dynamic' AND duration_bucket IN(60,120,180)))) other FROM analysis_runs r WHERE {where} AND completed_at>=%s GROUP BY 1 ORDER BY 1",args+(start,)); raw_daily=cur.fetchall(); keys=("static","dynamic_60","dynamic_120","dynamic_180","other")
         elif metric=="samples":
             cur.execute(f"SELECT first_seen::date AS \"day\",count(*) total FROM samples s WHERE {sample_where} AND first_seen>=%s GROUP BY 1 ORDER BY 1",sample_args+(start,)); raw_daily=cur.fetchall(); keys=("total",)
-        else:
-            cur.execute(f"SELECT first_analysis_at::date AS \"day\",count(*) total FROM logical_experiment_groups g WHERE {group_where} AND first_analysis_at>=%s GROUP BY 1 ORDER BY 1",group_args+(start,)); raw_daily=cur.fetchall(); keys=("total",)
         daily=zero_fill_daily(start.date(),end,raw_daily,keys)
-        logical_results=fetch_logical_results(cur,mode,start)
+        sample_results=fetch_sample_results(cur,mode,start)
         cur.execute("SELECT * FROM collector_status WHERE singleton"); collector=cur.fetchone()
         cur.execute("SELECT count(*) count FROM collection_errors WHERE occurred_at>=now()-interval '24 hours'"); recent_errors=cur.fetchone()["count"]
     chart_max=max([sum(row[key] for key in keys) for row in daily] or [1]); chart_max=max(chart_max,1)
-    logical_summary=summarize_logical_results(logical_results)
-    verdict_matrix=[{"kind":row["kind"],"counts":row["verdicts"],"total":row["total"]} for row in logical_summary]
-    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"chart_max":chart_max,"metric":metric,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":logical_summary,"collector":collector,"missing":missing,"recent_errors":recent_errors})
-
-
-@app.get("/groups/incomplete",response_class=HTMLResponse,dependencies=[Depends(auth)])
-def incomplete_groups(request:Request,page:int=1):
-    mode,start,_=filters(request); where,args=mode_sql(mode,"g"); page=max(page,1)
-    with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT c.group_id,s.id sample_id,s.sha256,s.filename,g.grouping_confidence,g.grouping_method,g.grouping_explanation,g.ambiguity_flag,c.expected_slots_present,c.missing_slots,c.duplicate_slots,c.source_submission_count,c.experiment_span_seconds,c.first_analysis_at,c.last_analysis_at FROM analysis_group_completeness c JOIN logical_experiment_groups g ON g.id=c.group_id JOIN samples s ON s.id=g.sample_id WHERE {where} AND c.missing_slot_count>0 AND c.last_analysis_at>=%s ORDER BY c.last_analysis_at DESC LIMIT 100 OFFSET %s",args+(start,(page-1)*100)); rows=cur.fetchall()
-    return render(request,"groups.html",{"title":"Incomplete analysis groups","groups":rows,"page":page})
+    sample_summary=summarize_sample_results(sample_results)
+    verdict_matrix=[{"kind":row["kind"],"counts":row["verdicts"],"total":row["total"]} for row in sample_summary]
+    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"chart_max":chart_max,"metric":metric,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":sample_summary,"collector":collector,"recent_errors":recent_errors})
 
 
 @app.get("/verdicts",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def verdicts(request:Request):
-    mode,start,_=filters(request); where,args=mode_sql(mode)
+    mode,start,_=filters(request); where,args=mode_sql(mode,"s")
     with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT analysis_type,duration_bucket,verdict,support_classification,count(*) count FROM analysis_runs r WHERE {where} AND completed_at>=%s GROUP BY 1,2,3,4 ORDER BY count DESC",args+(start,)); rows=cur.fetchall()
-        cur.execute(f"SELECT a.duration_bucket from_duration,b.duration_bucket to_duration,a.verdict from_verdict,b.verdict to_verdict,count(*) count FROM logical_experiment_group_runs la JOIN analysis_runs a ON a.id=la.analysis_run_id JOIN logical_experiment_group_runs lb ON lb.logical_experiment_group_id=la.logical_experiment_group_id JOIN analysis_runs b ON b.id=lb.analysis_run_id AND a.duration_bucket<b.duration_bucket WHERE {where.replace('r.','a.')} AND a.completed_at>=%s AND a.analysis_type='dynamic' AND b.analysis_type='dynamic' GROUP BY 1,2,3,4 ORDER BY 1,2,3,4",args+(start,)); transitions=cur.fetchall()
-    return render(request,"table_page.html",{"title":"Verdict comparison","intro":"Static consensus and duration transitions. Links open the matching sample set.","sections":[("Verdict and support totals",rows),("Dynamic transition matrices",transitions)]})
+        cur.execute(f"SELECT static_verdict,dynamic_60_verdict,dynamic_120_verdict,dynamic_180_verdict,count(*) count FROM sample_analysis_summary sas JOIN samples s ON s.id=sas.sample_id WHERE {where} AND s.latest_seen>=%s GROUP BY 1,2,3,4 ORDER BY count DESC",args+(start,)); rows=cur.fetchall()
+    return render(request,"table_page.html",{"title":"Verdict comparison","intro":"Sample-level verdicts; repeated runs are combined as consensus or mixed.","sections":[("Sample verdict combinations",rows)]})
 
 
 @app.get("/vtis",response_class=HTMLResponse,dependencies=[Depends(auth)])
@@ -134,7 +120,7 @@ def samples(request:Request,q:str="",page:int=1):
     search_sql="" if not q else "AND (s.sha256 ILIKE %s OR s.sha1 ILIKE %s OR s.md5 ILIKE %s OR s.filename ILIKE %s OR EXISTS(SELECT 1 FROM analysis_runs ar WHERE ar.sample_id=s.id AND (ar.vmray_analysis_id::text ILIKE %s OR ar.vmray_submission_id::text ILIKE %s)) OR EXISTS(SELECT 1 FROM ioc_observations io JOIN analysis_runs ar ON ar.id=io.analysis_run_id WHERE ar.sample_id=s.id AND (io.original_value ILIKE %s OR io.normalized_value ILIKE %s)) OR EXISTS(SELECT 1 FROM vti_observations vo JOIN analysis_runs ar ON ar.id=vo.analysis_run_id JOIN vti_definitions vd ON vd.id=vo.vti_definition_id WHERE ar.sample_id=s.id AND vd.stable_id ILIKE %s))"
     params=args+(start,)+((search,)*9 if q else ())+(50,(page-1)*50)
     with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT s.id,s.sha256,s.filename,s.first_seen,s.latest_seen,s.is_demo,g.id group_id,g.grouping_confidence,g.grouping_method,g.ambiguity_flag,c.completeness_status,c.expected_slots_present,c.missing_slots,c.source_submission_count,max(r.verdict) FILTER(WHERE lr.expected_slot LIKE 'static_%') static_verdict,max(r.verdict) FILTER(WHERE lr.expected_slot='dynamic_60') dynamic_60,max(r.verdict) FILTER(WHERE lr.expected_slot='dynamic_120') dynamic_120,max(r.verdict) FILTER(WHERE lr.expected_slot='dynamic_180') dynamic_180,string_agg(DISTINCT r.support_classification,', ') support FROM samples s JOIN logical_experiment_groups g ON g.sample_id=s.id JOIN analysis_group_completeness c ON c.group_id=g.id JOIN logical_experiment_group_runs lr ON lr.logical_experiment_group_id=g.id JOIN analysis_runs r ON r.id=lr.analysis_run_id WHERE {where} AND r.completed_at>=%s {search_sql} GROUP BY s.id,g.id,c.group_id,c.completeness_status,c.expected_slots_present,c.missing_slots,c.source_submission_count ORDER BY s.latest_seen DESC,g.id DESC LIMIT %s OFFSET %s",params); rows=cur.fetchall()
+        cur.execute(f"SELECT s.*,sas.* FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE {where} AND s.latest_seen>=%s {search_sql} ORDER BY s.latest_seen DESC LIMIT %s OFFSET %s",params); rows=cur.fetchall()
     return render(request,"samples.html",{"title":"Samples","samples":rows,"q":q,"page":page})
 
 
@@ -143,24 +129,20 @@ def sample_detail(request:Request,sample_id:int):
     with connection() as conn,conn.cursor() as cur:
         cur.execute("SELECT * FROM samples WHERE id=%s",(sample_id,)); sample=cur.fetchone()
         if not sample:raise HTTPException(404)
-        cur.execute("SELECT g.*,c.expected_slots_present,c.missing_slots,c.source_submission_count,c.experiment_span_seconds,c.completeness_status FROM logical_experiment_groups g JOIN analysis_group_completeness c ON c.group_id=g.id WHERE g.sample_id=%s ORDER BY g.first_analysis_at,g.id",(sample_id,)); groups=cur.fetchall()
-        cur.execute("SELECT r.*,lr.logical_experiment_group_id,lr.expected_slot,(SELECT count(*) FROM vti_observations WHERE analysis_run_id=r.id) vti_count,(SELECT count(*) FROM vti_observations WHERE analysis_run_id=r.id AND score>=3) high_vti_count,(SELECT count(*) FROM ioc_observations WHERE analysis_run_id=r.id) ioc_count,(SELECT count(*) FROM ioc_observations WHERE analysis_run_id=r.id AND actionable) actionable_ioc_count FROM logical_experiment_group_runs lr JOIN analysis_runs r ON r.id=lr.analysis_run_id WHERE r.sample_id=%s ORDER BY lr.logical_experiment_group_id,lr.expected_slot,r.vmray_analysis_id",(sample_id,)); runs=cur.fetchall()
-        cur.execute("SELECT r.* FROM unassigned_analysis_runs r WHERE r.sample_id=%s ORDER BY coalesce(r.started_at,r.completed_at),r.vmray_analysis_id",(sample_id,)); unassigned=cur.fetchall()
-    by_group={group["id"]:group for group in groups}
-    for group in groups: group["slots"]={slot:[] for slot in EXPECTED_SLOTS}; group["unmapped_runs"]=[]
+        cur.execute("SELECT r.*,(SELECT count(*) FROM vti_observations WHERE analysis_run_id=r.id) vti_count,(SELECT count(*) FROM vti_observations WHERE analysis_run_id=r.id AND score>=3) high_vti_count,(SELECT count(*) FROM ioc_observations WHERE analysis_run_id=r.id) ioc_count,(SELECT count(*) FROM ioc_observations WHERE analysis_run_id=r.id AND actionable) actionable_ioc_count FROM analysis_runs r WHERE r.sample_id=%s ORDER BY coalesce(r.started_at,r.completed_at),r.vmray_analysis_id",(sample_id,)); runs=cur.fetchall()
+    sections={"Static analyses":[],"Dynamic 60s analyses":[],"Dynamic 120s analyses":[],"Dynamic 180s analyses":[],"Other/unknown analyses":[]}
     for run in runs:
-        slot=run["expected_slot"]
-        by_group[run["logical_experiment_group_id"]]["slots"][slot].append(run)
-    return render(request,"sample_detail.html",{"title":"Sample detail","sample":sample,"groups":groups,"expected_slots":EXPECTED_SLOTS,"unassigned":unassigned})
+        key="Static analyses" if run["analysis_type"]=="static" else f"Dynamic {run['duration_bucket']}s analyses" if run["analysis_type"]=="dynamic" and run["duration_bucket"] in (60,120,180) else "Other/unknown analyses";sections[key].append(run)
+    return render(request,"sample_detail.html",{"title":"Sample detail","sample":sample,"sections":sections})
 
 
 EXPORTS={
- "samples":"SELECT s.*,g.id AS logical_group_id,g.grouping_confidence,g.grouping_method,g.ambiguity_flag,c.completeness_status,c.expected_slots_present,c.missing_slots,c.source_submission_count FROM samples s JOIN logical_experiment_groups g ON g.sample_id=s.id JOIN analysis_group_completeness c ON c.group_id=g.id WHERE s.is_demo=%s ORDER BY s.latest_seen DESC,g.id", "analysis-runs":"SELECT * FROM analysis_runs WHERE is_demo=%s ORDER BY completed_at DESC",
+ "samples":"SELECT s.*,sas.static_count,sas.dynamic_60_count,sas.dynamic_120_count,sas.dynamic_180_count,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.is_demo=%s ORDER BY s.latest_seen DESC", "analysis-runs":"SELECT * FROM analysis_runs WHERE is_demo=%s ORDER BY completed_at DESC",
  "vti-observations":"SELECT o.*,d.stable_id,d.category,d.operation FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.is_demo=%s",
  "ioc-observations":"SELECT i.* FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s", "collection-errors":"SELECT * FROM collection_errors ORDER BY occurred_at DESC",
- "verdict-comparisons":"SELECT l.logical_experiment_group_id,l.expected_slot,r.analysis_type,r.duration_bucket,r.verdict,r.support_classification FROM logical_experiment_group_runs l JOIN analysis_runs r ON r.id=l.analysis_run_id WHERE r.is_demo=%s ORDER BY l.logical_experiment_group_id,l.expected_slot",
- "vti-comparisons":"SELECT l.logical_experiment_group_id,l.expected_slot,r.duration_bucket,d.stable_id,o.score,o.scope,o.artifact_id FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id JOIN logical_experiment_group_runs l ON l.analysis_run_id=r.id WHERE r.is_demo=%s",
- "ioc-comparisons":"SELECT l.logical_experiment_group_id,l.expected_slot,r.duration_bucket,i.ioc_type,i.normalized_value,i.actionable FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id JOIN logical_experiment_group_runs l ON l.analysis_run_id=r.id WHERE r.is_demo=%s"
+ "verdict-comparisons":"SELECT sample_id,analysis_type,duration_bucket,verdict,support_classification FROM analysis_runs WHERE is_demo=%s ORDER BY sample_id,completed_at",
+ "vti-comparisons":"SELECT r.sample_id,r.duration_bucket,d.stable_id,o.score,o.scope,o.artifact_id FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.is_demo=%s",
+ "ioc-comparisons":"SELECT r.sample_id,r.duration_bucket,i.ioc_type,i.normalized_value,i.actionable FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s"
 }
 @app.get("/exports/{kind}.csv",dependencies=[Depends(auth)])
 def export(request:Request,kind:str):

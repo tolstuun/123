@@ -27,11 +27,11 @@ The archive endpoint ignored a byte Range request and returned a complete ZIP. T
 
 Responses are JSON objects with `data` and `result`. `_limit` is accepted, but the live server capped a requested 100 rows at 50. Results are newest-first. `_max_id` is inclusive: using the smallest ID from one page repeats that row on the next page. The collector deduplicates by `analysis_id`, uses `_max_id`, and combines it with a timestamp overlap checkpoint rather than assuming IDs alone are gap-free. Documented interval filtering includes `/rest/analysis/created/{start}~{end}`; equality filters also exist as path endpoints for sample, submission, job, configuration, verdict, and other fields.
 
-## Analysis and grouping fields
+## Analysis provenance fields
 
 Verified listing/detail fields include `analysis_id`, `analysis_sample_id`, `analysis_submission_id`, `analysis_submission_ids`, `analysis_job_id`, `analysis_parent_analysis_id`, hashes, `analysis_created`, `analysis_job_started`, `analysis_result_code`, `analysis_result_str`, `analysis_verdict`, verdict reason code/description, VTI score, analyzer/static/dynamic engine versions, platform, configuration identifiers, and `analysis_user_config_config`.
 
-The strongest grouping key is SHA-256 plus submission ID. When submission ID is missing, SHA-256 plus a deterministic UTC time window is used and marked ambiguous. Job ID identifies an individual run and is not used alone to group the six runs.
+SHA-256 identifies the analytical sample. Submission and job IDs are retained on each run as source provenance and do not create analytical entities.
 
 ## Static/dynamic and duration identification
 
@@ -39,7 +39,7 @@ The strongest grouping key is SHA-256 plus submission ID. When submission ID is 
 - `analysis_job_type=full_analysis` identifies dynamic analysis on this server.
 - Dynamic requested durations are verified in the JSON string `analysis_user_config_config`, e.g. `{"timeout":60}`, `120`, and `180`.
 - Actual duration is derived from verified start/completion timestamps when both exist. The API listing does not expose a distinct authoritative actual-duration field.
-- Static repetition numbers are assigned deterministically within a group by `(analysis_created, analysis_id)` and remain separate observations.
+- Static analyses remain separate immutable observations linked directly to the sample.
 
 ## Status and verdict
 
