@@ -2,7 +2,6 @@ from datetime import date, timedelta
 
 RUN_KINDS = ("Static", "Dynamic 60s", "Dynamic 120s", "Dynamic 180s")
 VERDICT_CATEGORIES = ("malicious", "suspicious", "benign", "unknown", "failed", "mixed", "missing")
-SUPPORT_CATEGORIES = ("av_only", "yara_only", "av_yara_only", "behavioral", "none", "missing")
 
 SAMPLE_COHORT_SQL = """
 SELECT s.id sample_id,s.first_seen,
@@ -15,24 +14,21 @@ FROM samples s WHERE {mode_clause} AND s.first_seen >= %s
 
 SAMPLE_RESULTS_SQL = """
 WITH selected AS (
- SELECT s.id,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict
- FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.id=ANY(%s)
+ SELECT s.id FROM samples s WHERE s.id=ANY(%s)
 ), kinds(kind) AS (VALUES ('Static'),('Dynamic 60s'),('Dynamic 120s'),('Dynamic 180s')),
-evidence AS (
+results AS (
  SELECT selected.id sample_id,k.kind,
-  CASE k.kind WHEN 'Static' THEN selected.static_verdict WHEN 'Dynamic 60s' THEN selected.dynamic_60_verdict WHEN 'Dynamic 120s' THEN selected.dynamic_120_verdict ELSE selected.dynamic_180_verdict END verdict,
   count(r.id) run_count,
-  bool_or(o.score BETWEEN 3 AND 5 AND lower(trim(d.category))='antivirus') has_av,
-  bool_or(o.score BETWEEN 3 AND 5 AND lower(trim(d.category))='yara') has_yara,
-  bool_or(o.score BETWEEN 3 AND 5 AND lower(trim(d.category)) NOT IN ('antivirus','yara')) has_behavioral
+  count(DISTINCT r.verdict) verdict_count,min(r.verdict) only_verdict,
+  bool_or(r.verdict='malicious') has_malicious,bool_or(r.verdict='suspicious') has_suspicious
  FROM selected CROSS JOIN kinds k
  LEFT JOIN analysis_runs r ON r.sample_id=selected.id AND ((k.kind='Static' AND r.analysis_type='static') OR (k.kind='Dynamic 60s' AND r.analysis_type='dynamic' AND r.duration_bucket=60) OR (k.kind='Dynamic 120s' AND r.analysis_type='dynamic' AND r.duration_bucket=120) OR (k.kind='Dynamic 180s' AND r.analysis_type='dynamic' AND r.duration_bucket=180))
- LEFT JOIN vti_observations o ON o.analysis_run_id=r.id LEFT JOIN vti_definitions d ON d.id=o.vti_definition_id
- GROUP BY selected.id,k.kind,selected.static_verdict,selected.dynamic_60_verdict,selected.dynamic_120_verdict,selected.dynamic_180_verdict
+ GROUP BY selected.id,k.kind
 )
-SELECT sample_id,kind run_kind,verdict,
- CASE WHEN run_count=0 THEN 'missing' WHEN has_behavioral THEN 'behavioral' WHEN has_av AND has_yara THEN 'av_yara_only' WHEN has_av THEN 'av_only' WHEN has_yara THEN 'yara_only' ELSE 'none' END support
-FROM evidence
+SELECT sample_id,kind run_kind,CASE WHEN run_count=0 THEN 'missing' WHEN verdict_count=1 THEN only_verdict ELSE 'mixed' END verdict,
+ run_count>0 analyzed,coalesce(has_malicious,false) malicious,
+ (NOT coalesce(has_malicious,false) AND coalesce(has_suspicious,false)) suspicious
+FROM results
 """
 
 
@@ -54,11 +50,9 @@ def summarize_sample_results(rows):
     for kind in RUN_KINDS:
         selected=[r for r in rows if r["run_kind"]==kind]
         verdicts={c:sum(r["verdict"]==c for r in selected) for c in VERDICT_CATEGORIES}
-        support={c:sum(r["support"]==c for r in selected) for c in SUPPORT_CATEGORIES}
-        av_yara=sum(support[c] for c in ("av_only","yara_only","av_yara_only"))
-        output.append({"kind":kind,"total":len(selected),"verdicts":verdicts,"support":support,"av_yara_only":av_yara,
-         "av_yara_malicious":sum(r["support"] in ("av_only","yara_only","av_yara_only") and r["verdict"]=="malicious" for r in selected),
-         "av_yara_suspicious":sum(r["support"] in ("av_only","yara_only","av_yara_only") and r["verdict"]=="suspicious" for r in selected)})
+        malicious=sum(r["malicious"] for r in selected);suspicious=sum(r["suspicious"] for r in selected)
+        output.append({"kind":kind,"total":len(selected),"verdicts":verdicts,"analyzed":sum(r["analyzed"] for r in selected),
+         "malicious":malicious,"suspicious":suspicious,"detected":malicious+suspicious})
     return output
 
 

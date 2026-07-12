@@ -79,7 +79,7 @@ def overview(request:Request):
     keys=("samples_received","static_analyzed","dynamic_60","dynamic_120","dynamic_180");daily=zero_fill_daily(start.date(),end,raw_daily,keys)
     sample_summary=summarize_sample_results(sample_results)
     verdict_matrix=[{"kind":row["kind"],"counts":row["verdicts"],"total":row["total"]} for row in sample_summary]
-    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"support_matrix":sample_summary,"collector":collector,"recent_errors":recent_errors})
+    return render(request,"overview.html",{"title":"Overview","metrics":metrics,"daily":daily,"chart_keys":keys,"verdict_matrix":verdict_matrix,"verdict_categories":VERDICT_CATEGORIES,"detection_rows":sample_summary,"collector":collector,"recent_errors":recent_errors})
 
 
 @app.get("/verdicts",response_class=HTMLResponse,dependencies=[Depends(auth)])

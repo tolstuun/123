@@ -2,10 +2,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from app.analytics import RUN_KINDS, SAMPLE_COHORT_SQL, SAMPLE_RESULTS_SQL, summarize_cohort, summarize_sample_results
 
-def row(sample,kind,verdict,support="none"):return {"sample_id":sample,"run_kind":kind,"verdict":verdict,"support":support}
+def row(sample,kind,verdict,analyzed=True,malicious=False,suspicious=False):return {"sample_id":sample,"run_kind":kind,"verdict":verdict,"analyzed":analyzed,"malicious":malicious,"suspicious":suspicious}
 
 def test_one_sample_produces_one_result_per_kind_and_equal_totals():
-    rows=[row(1,k,"missing","missing") for k in RUN_KINDS]
+    rows=[row(1,k,"missing",False) for k in RUN_KINDS]
     summary=summarize_sample_results(rows)
     assert [x["total"] for x in summary]==[1,1,1,1]
     assert all(x["verdicts"]["missing"]==1 for x in summary)
@@ -21,9 +21,16 @@ def test_runtime_has_no_grouping_references():
     runtime="\n".join(p.read_text(encoding="utf-8") for p in Path("app").rglob("*") if p.is_file() and p.suffix in {".py",".html"})
     for name in deleted:assert name not in runtime
 
-def test_support_query_uses_sample_and_requested_bucket():
+def test_detection_query_uses_sample_and_requested_bucket():
     sql=SAMPLE_RESULTS_SQL.lower();assert "r.sample_id=selected.id" in sql and "duration_bucket=60" in sql
-    assert "actual_duration" not in sql and "o.score between 3 and 5" in sql
+    assert "actual_duration" not in sql and "vti_observations" not in sql
+    assert "bool_or(r.verdict='malicious')" in sql
+
+def test_detection_counts_are_unique_and_mutually_exclusive():
+    rows=[row(1,"Static","mixed",True,True,False),row(2,"Static","suspicious",True,False,True),row(3,"Static","benign")]
+    static=summarize_sample_results(rows)[0]
+    assert static["analyzed"]==3 and static["malicious"]==1 and static["suspicious"]==1
+    assert static["detected"]==static["malicious"]+static["suspicious"]
 
 def test_cohort_deduplicates_runs_and_uses_sample_first_seen():
     sql=SAMPLE_COHORT_SQL.lower()
