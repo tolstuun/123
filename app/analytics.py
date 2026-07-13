@@ -1,7 +1,14 @@
 from datetime import date, timedelta
 
 RUN_KINDS = ("Static", "Dynamic 60s", "Dynamic 120s", "Dynamic 180s")
-VERDICT_CATEGORIES = ("malicious", "suspicious", "benign", "no_verdict")
+VERDICT_CATEGORIES = ("malicious", "suspicious", "benign")
+
+ELIGIBILITY_PREDICATE = """
+EXISTS(SELECT 1 FROM analysis_runs er WHERE er.sample_id={alias}.id AND er.analysis_type='static')
+AND EXISTS(SELECT 1 FROM analysis_runs er WHERE er.sample_id={alias}.id AND er.analysis_type='dynamic' AND er.duration_bucket=60)
+AND EXISTS(SELECT 1 FROM analysis_runs er WHERE er.sample_id={alias}.id AND er.analysis_type='dynamic' AND er.duration_bucket=120)
+AND EXISTS(SELECT 1 FROM analysis_runs er WHERE er.sample_id={alias}.id AND er.analysis_type='dynamic' AND er.duration_bucket=180)
+"""
 
 SAMPLE_COHORT_SQL = """
 SELECT s.id sample_id,s.first_seen,
@@ -9,7 +16,7 @@ SELECT s.id sample_id,s.first_seen,
  EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=60) has_dynamic_60,
  EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=120) has_dynamic_120,
  EXISTS(SELECT 1 FROM analysis_runs r WHERE r.sample_id=s.id AND r.analysis_type='dynamic' AND r.duration_bucket=180) has_dynamic_180
-FROM samples s WHERE {mode_clause} AND s.first_seen >= %s
+FROM samples s WHERE {mode_clause} AND s.first_seen >= %s AND {eligibility}
 """
 
 SAMPLE_RESULTS_SQL = """
@@ -34,7 +41,7 @@ FROM results
 def fetch_sample_cohort(cur, mode, start):
     clause = "TRUE" if mode == "combined" else "s.is_demo=%s"
     args = (start,) if mode == "combined" else (mode == "demo", start)
-    cur.execute(SAMPLE_COHORT_SQL.format(mode_clause=clause), args)
+    cur.execute(SAMPLE_COHORT_SQL.format(mode_clause=clause,eligibility=ELIGIBILITY_PREDICATE.format(alias="s")), args)
     return cur.fetchall()
 
 

@@ -5,10 +5,10 @@ from app.analytics import RUN_KINDS, SAMPLE_COHORT_SQL, SAMPLE_RESULTS_SQL, summ
 def row(sample,kind,verdict,analyzed=True,malicious=False,suspicious=False):return {"sample_id":sample,"run_kind":kind,"verdict":verdict,"analyzed":analyzed,"malicious":malicious,"suspicious":suspicious}
 
 def test_one_sample_produces_one_result_per_kind_and_equal_totals():
-    rows=[row(1,k,"no_verdict",False) for k in RUN_KINDS]
+    rows=[row(1,k,"benign") for k in RUN_KINDS]
     summary=summarize_sample_results(rows)
     assert [x["total"] for x in summary]==[1,1,1,1]
-    assert all(x["verdicts"]["no_verdict"]==1 for x in summary)
+    assert all(x["verdicts"]["benign"]==1 for x in summary)
 
 def test_identical_and_disagreeing_verdicts_are_defined_in_view():
     migration=Path("migrations/006_remove_grouping.sql").read_text().lower()
@@ -43,6 +43,19 @@ def test_cohort_deduplicates_runs_and_uses_sample_first_seen():
     assert sql.count("exists(select 1 from analysis_runs") == 4
     assert "s.first_seen >= %s" in sql and "completed_at" not in sql
     assert "r.duration_bucket=60" in sql and "actual_duration" not in sql
+    assert "has_dynamic_180" in sql and "and {eligibility}" in sql
+
+def test_eligibility_is_dynamic_exists_predicate():
+    from app.analytics import ELIGIBILITY_PREDICATE
+    predicate=ELIGIBILITY_PREDICATE.lower()
+    assert predicate.count("exists(select 1") == 4
+    assert "analysis_type='static'" in predicate
+    assert all(f"duration_bucket={duration}" in predicate for duration in (60,120,180))
+    assert "count(" not in predicate
+
+def test_no_incomplete_state_ui_is_added():
+    overview=Path("app/templates/overview.html").read_text(encoding="utf-8").lower()
+    for word in ("pending","expired","incomplete","completeness"):assert word not in overview
 
 def test_daily_coverage_never_exceeds_received_samples():
     rows=[{"sample_id":1,"first_seen":datetime(2026,7,13,tzinfo=timezone.utc),"has_static":True,"has_dynamic_60":True,"has_dynamic_120":False,"has_dynamic_180":False},

@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .db import connection, open_pool
 from .migrate import migrate
-from .analytics import VERDICT_CATEGORIES, fetch_sample_cohort, fetch_sample_results, summarize_cohort, summarize_sample_results, zero_fill_daily
+from .analytics import ELIGIBILITY_PREDICATE, VERDICT_CATEGORIES, fetch_sample_cohort, fetch_sample_results, summarize_cohort, summarize_sample_results, zero_fill_daily
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
 templates=Jinja2Templates(directory="app/templates"); app.mount("/static",StaticFiles(directory="app/static"),name="static"); security=HTTPBasic()
@@ -86,16 +86,18 @@ def overview(request:Request):
 def verdicts(request:Request):
     mode,start,_=filters(request); where,args=mode_sql(mode,"s")
     with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT static_verdict,dynamic_60_verdict,dynamic_120_verdict,dynamic_180_verdict,count(*) count FROM sample_analysis_summary sas JOIN samples s ON s.id=sas.sample_id WHERE {where} AND s.latest_seen>=%s GROUP BY 1,2,3,4 ORDER BY count DESC",args+(start,)); rows=cur.fetchall()
+        cohort=fetch_sample_cohort(cur,mode,start);ids=[r["sample_id"] for r in cohort]
+        cur.execute("SELECT static_verdict,dynamic_60_verdict,dynamic_120_verdict,dynamic_180_verdict,count(*) count FROM sample_analysis_summary WHERE sample_id=ANY(%s) GROUP BY 1,2,3,4 ORDER BY count DESC",(ids or [0],)); rows=cur.fetchall()
     return render(request,"table_page.html",{"title":"Verdict comparison","intro":"Sample-level verdicts; repeated runs are combined as consensus or mixed.","sections":[("Sample verdict combinations",rows)]})
 
 
 @app.get("/vtis",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def vtis(request:Request):
-    mode,start,_=filters(request); where,args=mode_sql(mode)
+    mode,start,_=filters(request)
     with connection() as conn,conn.cursor() as cur:
-        cur.execute(f"SELECT d.stable_id,d.category,d.operation,count(*) observations,round(avg(o.score),2) avg_score,max(o.score) max_score FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE {where} AND r.completed_at>=%s GROUP BY 1,2,3 ORDER BY observations DESC LIMIT 100",args+(start,)); top=cur.fetchall()
-        cur.execute(f"SELECT r.analysis_type,r.duration_bucket,round(avg(x.n),2) average,percentile_cont(.5) WITHIN GROUP(ORDER BY x.n) median,max(x.n) maximum FROM (SELECT analysis_run_id,count(*) n FROM vti_observations GROUP BY 1)x JOIN analysis_runs r ON r.id=x.analysis_run_id WHERE {where} AND r.completed_at>=%s GROUP BY 1,2 ORDER BY 1,2",args+(start,)); stats=cur.fetchall()
+        cohort=fetch_sample_cohort(cur,mode,start);ids=[r["sample_id"] for r in cohort]
+        cur.execute("SELECT d.stable_id,d.category,d.operation,count(*) observations,round(avg(o.score),2) avg_score,max(o.score) max_score FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.sample_id=ANY(%s) GROUP BY 1,2,3 ORDER BY observations DESC LIMIT 100",(ids or [0],)); top=cur.fetchall()
+        cur.execute("SELECT r.analysis_type,r.duration_bucket,round(avg(x.n),2) average,percentile_cont(.5) WITHIN GROUP(ORDER BY x.n) median,max(x.n) maximum FROM (SELECT analysis_run_id,count(*) n FROM vti_observations GROUP BY 1)x JOIN analysis_runs r ON r.id=x.analysis_run_id WHERE r.sample_id=ANY(%s) GROUP BY 1,2 ORDER BY 1,2",(ids or [0],)); stats=cur.fetchall()
     return render(request,"table_page.html",{"title":"VTI analytics","intro":"Stable identities are compared independently from observation scores and artifact scope.","sections":[("VTI counts",stats),("Top VTI",top)]})
 
 
@@ -131,18 +133,21 @@ def sample_detail(request:Request,sample_id:int):
 
 
 EXPORTS={
- "samples":"SELECT s.*,sas.static_count,sas.dynamic_60_count,sas.dynamic_120_count,sas.dynamic_180_count,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.is_demo=%s ORDER BY s.latest_seen DESC", "analysis-runs":"SELECT * FROM analysis_runs WHERE is_demo=%s ORDER BY completed_at DESC",
- "vti-observations":"SELECT o.*,d.stable_id,d.category,d.operation FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.is_demo=%s",
+ "samples":"SELECT s.*,sas.static_count,sas.dynamic_60_count,sas.dynamic_120_count,sas.dynamic_180_count,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.id=ANY(%s) ORDER BY s.latest_seen DESC", "analysis-runs":"SELECT * FROM analysis_runs WHERE is_demo=%s ORDER BY completed_at DESC",
+ "vti-observations":"SELECT o.*,d.stable_id,d.category,d.operation FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.sample_id=ANY(%s)",
  "ioc-observations":"SELECT i.* FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s", "collection-errors":"SELECT * FROM collection_errors ORDER BY occurred_at DESC",
- "verdict-comparisons":"SELECT sample_id,analysis_type,duration_bucket,verdict,support_classification FROM analysis_runs WHERE is_demo=%s ORDER BY sample_id,completed_at",
- "vti-comparisons":"SELECT r.sample_id,r.duration_bucket,d.stable_id,o.score,o.scope,o.artifact_id FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.is_demo=%s",
+ "verdict-comparisons":"SELECT sample_id,analysis_type,duration_bucket,verdict,support_classification FROM analysis_runs WHERE sample_id=ANY(%s) ORDER BY sample_id,completed_at",
+ "vti-comparisons":"SELECT r.sample_id,r.duration_bucket,d.stable_id,o.score,o.scope,o.artifact_id FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.sample_id=ANY(%s)",
  "ioc-comparisons":"SELECT r.sample_id,r.duration_bucket,i.ioc_type,i.normalized_value,i.actionable FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s"
 }
 @app.get("/exports/{kind}.csv",dependencies=[Depends(auth)])
 def export(request:Request,kind:str):
     if kind not in EXPORTS:raise HTTPException(404)
-    mode,_,_=filters(request); sql=EXPORTS[kind]; params=() if kind=="collection-errors" else (mode=="demo",)
-    if mode=="combined" and kind!="collection-errors":sql=sql.replace("WHERE is_demo=%s","WHERE TRUE").replace("WHERE r.is_demo=%s","WHERE TRUE").replace("WHERE s.is_demo=%s","WHERE TRUE");params=()
+    mode,start,_=filters(request); sql=EXPORTS[kind]; params=() if kind=="collection-errors" else (mode=="demo",)
+    if kind in {"samples","vti-observations","verdict-comparisons","vti-comparisons"}:
+        with connection() as conn,conn.cursor() as cur:ids=[r["sample_id"] for r in fetch_sample_cohort(cur,mode,start)]
+        params=(ids or [0],)
+    if mode=="combined" and kind not in {"collection-errors","samples","vti-observations","verdict-comparisons","vti-comparisons"}:sql=sql.replace("WHERE is_demo=%s","WHERE TRUE").replace("WHERE r.is_demo=%s","WHERE TRUE").replace("WHERE s.is_demo=%s","WHERE TRUE");params=()
     with connection() as conn,conn.cursor() as cur:cur.execute(sql,params);rows=cur.fetchall()
     out=io.StringIO(); writer=csv.DictWriter(out,fieldnames=list(rows[0]) if rows else ["empty"]);writer.writeheader();writer.writerows(rows)
     return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="{kind}.csv"'})
