@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 RUN_KINDS = ("Static", "Dynamic 60s", "Dynamic 120s", "Dynamic 180s")
-VERDICT_CATEGORIES = ("malicious", "suspicious", "benign", "unknown", "failed", "mixed", "missing")
+VERDICT_CATEGORIES = ("malicious", "suspicious", "benign", "no_verdict")
 
 SAMPLE_COHORT_SQL = """
 SELECT s.id sample_id,s.first_seen,
@@ -19,15 +19,14 @@ WITH selected AS (
 results AS (
  SELECT selected.id sample_id,k.kind,
   count(r.id) run_count,
-  count(DISTINCT r.verdict) verdict_count,min(r.verdict) only_verdict,
-  bool_or(r.verdict='malicious') has_malicious,bool_or(r.verdict='suspicious') has_suspicious
+  bool_or(r.verdict='malicious') has_malicious,bool_or(r.verdict='suspicious') has_suspicious,
+  bool_or(r.verdict='benign') has_benign
  FROM selected CROSS JOIN kinds k
  LEFT JOIN analysis_runs r ON r.sample_id=selected.id AND ((k.kind='Static' AND r.analysis_type='static') OR (k.kind='Dynamic 60s' AND r.analysis_type='dynamic' AND r.duration_bucket=60) OR (k.kind='Dynamic 120s' AND r.analysis_type='dynamic' AND r.duration_bucket=120) OR (k.kind='Dynamic 180s' AND r.analysis_type='dynamic' AND r.duration_bucket=180))
  GROUP BY selected.id,k.kind
 )
-SELECT sample_id,kind run_kind,CASE WHEN run_count=0 THEN 'missing' WHEN verdict_count=1 THEN only_verdict ELSE 'mixed' END verdict,
- run_count>0 analyzed,coalesce(has_malicious,false) malicious,
- (NOT coalesce(has_malicious,false) AND coalesce(has_suspicious,false)) suspicious
+SELECT sample_id,kind run_kind,CASE WHEN coalesce(has_malicious,false) THEN 'malicious' WHEN coalesce(has_suspicious,false) THEN 'suspicious' WHEN coalesce(has_benign,false) THEN 'benign' ELSE 'no_verdict' END verdict,
+ run_count>0 analyzed
 FROM results
 """
 
@@ -50,7 +49,7 @@ def summarize_sample_results(rows):
     for kind in RUN_KINDS:
         selected=[r for r in rows if r["run_kind"]==kind]
         verdicts={c:sum(r["verdict"]==c for r in selected) for c in VERDICT_CATEGORIES}
-        malicious=sum(r["malicious"] for r in selected);suspicious=sum(r["suspicious"] for r in selected)
+        malicious=verdicts["malicious"];suspicious=verdicts["suspicious"]
         output.append({"kind":kind,"total":len(selected),"verdicts":verdicts,"analyzed":sum(r["analyzed"] for r in selected),
          "malicious":malicious,"suspicious":suspicious,"detected":malicious+suspicious})
     return output

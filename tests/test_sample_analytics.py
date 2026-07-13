@@ -5,10 +5,10 @@ from app.analytics import RUN_KINDS, SAMPLE_COHORT_SQL, SAMPLE_RESULTS_SQL, summ
 def row(sample,kind,verdict,analyzed=True,malicious=False,suspicious=False):return {"sample_id":sample,"run_kind":kind,"verdict":verdict,"analyzed":analyzed,"malicious":malicious,"suspicious":suspicious}
 
 def test_one_sample_produces_one_result_per_kind_and_equal_totals():
-    rows=[row(1,k,"missing",False) for k in RUN_KINDS]
+    rows=[row(1,k,"no_verdict",False) for k in RUN_KINDS]
     summary=summarize_sample_results(rows)
     assert [x["total"] for x in summary]==[1,1,1,1]
-    assert all(x["verdicts"]["missing"]==1 for x in summary)
+    assert all(x["verdicts"]["no_verdict"]==1 for x in summary)
 
 def test_identical_and_disagreeing_verdicts_are_defined_in_view():
     migration=Path("migrations/006_remove_grouping.sql").read_text().lower()
@@ -27,10 +27,16 @@ def test_detection_query_uses_sample_and_requested_bucket():
     assert "bool_or(r.verdict='malicious')" in sql
 
 def test_detection_counts_are_unique_and_mutually_exclusive():
-    rows=[row(1,"Static","mixed",True,True,False),row(2,"Static","suspicious",True,False,True),row(3,"Static","benign")]
+    rows=[row(1,"Static","malicious"),row(2,"Static","suspicious"),row(3,"Static","benign")]
     static=summarize_sample_results(rows)[0]
     assert static["analyzed"]==3 and static["malicious"]==1 and static["suspicious"]==1
     assert static["detected"]==static["malicious"]+static["suspicious"]
+
+def test_overview_verdict_priority_and_duration_isolation():
+    sql=SAMPLE_RESULTS_SQL.lower()
+    assert sql.index("has_malicious") < sql.index("has_suspicious") < sql.index("has_benign")
+    assert "r.duration_bucket=60" in sql and "r.duration_bucket=120" in sql and "r.duration_bucket=180" in sql
+    assert "mixed" not in sql and "'no_verdict'" in sql
 
 def test_cohort_deduplicates_runs_and_uses_sample_first_seen():
     sql=SAMPLE_COHORT_SQL.lower()

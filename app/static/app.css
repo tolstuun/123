@@ -151,9 +151,7 @@ button { padding: 9px 15px; border: 0; border-radius: 7px; background: var(--tea
 .verdict-malicious { fill: var(--red); background: var(--red); }
 .verdict-suspicious { fill: var(--orange); background: var(--orange); }
 .verdict-benign { fill: var(--green); background: var(--green); }
-.verdict-unknown { fill: #657b7e; background: #657b7e; }
-.verdict-failed { fill: #a94e9b; background: #a94e9b; }
-.verdict-mixed { fill: #d7b85c; background: #d7b85c; }
+.verdict-no_verdict { fill: #657b7e; background: #657b7e; }
 .missing-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 13px; }
 .missing-list div { display: flex; justify-content: space-between; padding: 9px 10px; border-radius: 6px; background: #0a1416; }
 .missing-list span { color: var(--muted); font-size: 11px; }
