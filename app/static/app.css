@@ -116,6 +116,8 @@ button { padding: 9px 15px; border: 0; border-radius: 7px; background: var(--tea
 
 /* Panels and charts */
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); gap: 12px; }
+.overview-primary { display: flex; flex-direction: column; width: 100%; max-width: 1150px; margin: 12px auto 0; gap: 12px; }
+.overview-primary .panel { width: 100%; margin: 0; }
 .panel, .run-card {
   margin: 0;
   padding: 17px;
