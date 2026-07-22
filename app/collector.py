@@ -4,6 +4,7 @@ from .config import settings
 from .db import connection
 from .domain import normalize_verdict
 from .migrate import migrate
+from .rounds import assign_rounds
 from .vti_taxonomy import classify_vtis
 from .vmray import VMRayClient, parse_time
 
@@ -13,8 +14,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 PARSER_VERSION = "1.0.0"
 
 
-def ingest(detail_payload, vti_payload, sample_payload, demo=False):
+def ingest(detail_payload, vti_payload, sample_payload, submission_payload):
     a=detail_payload.get("data",detail_payload); s=sample_payload.get("data",sample_payload)
+    submission_data=submission_payload.get("data",submission_payload)
     vtis=(vti_payload.get("data") or {}).get("threat_indicators",[])
     analysis_id=a["analysis_id"]; created=parse_time(a.get("analysis_created")) or datetime.now(timezone.utc); started=parse_time(a.get("analysis_job_started"))
     job_type=a.get("analysis_job_type"); analysis_type="static" if job_type=="only_static_analysis" else "dynamic" if job_type=="full_analysis" else "unknown"
@@ -26,10 +28,11 @@ def ingest(detail_payload, vti_payload, sample_payload, demo=False):
     is_failed=a.get("analysis_result_code") not in (1,"1")
     verdict=normalize_verdict(a.get("analysis_verdict"), is_failed)
     vti_counts=classify_vtis(vtis,analysis_id,log)
+    submission_created=parse_time(submission_data.get("submission_created")) or created
+    interface_name=submission_data.get("submission_interface_name")
     with connection() as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO samples(vmray_sample_id,sha256,sha1,md5,filename,file_type,first_seen,latest_seen,is_demo) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(sha256,is_demo) DO UPDATE SET first_seen=LEAST(samples.first_seen,EXCLUDED.first_seen),latest_seen=GREATEST(samples.latest_seen,EXCLUDED.latest_seen),filename=COALESCE(samples.filename,EXCLUDED.filename) RETURNING id",(a.get("analysis_sample_id"),sha256,a.get("analysis_sample_sha1"),a.get("analysis_sample_md5"),s.get("sample_filename"),s.get("sample_type"),created,created,demo)); sample_pk=cur.fetchone()["id"]
-        cur.execute("INSERT INTO analysis_runs(sample_id,vmray_analysis_id,vmray_sample_id,vmray_submission_id,vmray_job_id,analysis_type,requested_duration_seconds,duration_bucket,created_at,started_at,completed_at,vmray_version,analysis_configuration,target_environment,status,failure_state,verdict,original_verdict,verdict_score,verdict_reason,is_failed,vti_behavioural_high,vti_nonbehavioural_high,vti_config_extraction_high,vti_unknown_category_high,vti_total,is_demo,parser_version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(vmray_analysis_id,is_demo) DO UPDATE SET ingested_at=now(),verdict=EXCLUDED.verdict,status=EXCLUDED.status,failure_state=EXCLUDED.failure_state,completed_at=EXCLUDED.completed_at,is_failed=EXCLUDED.is_failed,vti_behavioural_high=EXCLUDED.vti_behavioural_high,vti_nonbehavioural_high=EXCLUDED.vti_nonbehavioural_high,vti_config_extraction_high=EXCLUDED.vti_config_extraction_high,vti_unknown_category_high=EXCLUDED.vti_unknown_category_high,vti_total=EXCLUDED.vti_total RETURNING id",(sample_pk,analysis_id,a.get("analysis_sample_id"),submission,a.get("analysis_job_id"),analysis_type,requested,requested if requested in (60,120,180) else None,created,started,created,a.get("analysis_analyzer_version") or a.get("analysis_static_engine_version") or a.get("analysis_dynamic_engine_version"),json.dumps(config),a.get("analysis_platform"),a.get("analysis_result_str"),None if not is_failed else a.get("analysis_result_str"),verdict,a.get("analysis_verdict"),a.get("analysis_vti_score"),a.get("analysis_verdict_reason_description"),is_failed,vti_counts.behavioural_high,vti_counts.nonbehavioural_high,vti_counts.config_extraction_high,vti_counts.unknown_category_high,vti_counts.total,demo,PARSER_VERSION)); run=cur.fetchone()["id"]
-        cur.execute("INSERT INTO verdict_observations(analysis_run_id,normalized_verdict,original_value,score,reason_code,reason_description,observed_at) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(analysis_run_id) DO NOTHING",(run,verdict,a.get("analysis_verdict"),a.get("analysis_vti_score"),a.get("analysis_verdict_reason_code"),a.get("analysis_verdict_reason_description"),created))
+        cur.execute("INSERT INTO samples(vmray_sample_id,sha256,sha1,md5,filename,file_type,first_seen,latest_seen) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(sha256) DO UPDATE SET first_seen=LEAST(samples.first_seen,EXCLUDED.first_seen),latest_seen=GREATEST(samples.latest_seen,EXCLUDED.latest_seen),filename=COALESCE(samples.filename,EXCLUDED.filename) RETURNING id",(a.get("analysis_sample_id"),sha256,a.get("analysis_sample_sha1"),a.get("analysis_sample_md5"),s.get("sample_filename"),s.get("sample_type"),created,created)); sample_pk=cur.fetchone()["id"]
+        cur.execute("INSERT INTO analysis_runs(sample_id,vmray_analysis_id,vmray_sample_id,vmray_submission_id,vmray_job_id,analysis_type,requested_duration_seconds,duration_bucket,created_at,started_at,completed_at,vmray_version,analysis_configuration,target_environment,status,failure_state,verdict,original_verdict,verdict_score,verdict_reason,is_failed,vti_behavioural_high,vti_nonbehavioural_high,vti_config_extraction_high,vti_unknown_category_high,vti_total,submission_created,submission_interface_name,round_id,parser_version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s) ON CONFLICT(vmray_analysis_id) DO UPDATE SET ingested_at=now(),verdict=EXCLUDED.verdict,status=EXCLUDED.status,failure_state=EXCLUDED.failure_state,completed_at=EXCLUDED.completed_at,is_failed=EXCLUDED.is_failed,vti_behavioural_high=EXCLUDED.vti_behavioural_high,vti_nonbehavioural_high=EXCLUDED.vti_nonbehavioural_high,vti_config_extraction_high=EXCLUDED.vti_config_extraction_high,vti_unknown_category_high=EXCLUDED.vti_unknown_category_high,vti_total=EXCLUDED.vti_total RETURNING id",(sample_pk,analysis_id,a.get("analysis_sample_id"),submission,a.get("analysis_job_id"),analysis_type,requested,requested if requested in (60,120,180) else None,created,started,created,a.get("analysis_analyzer_version") or a.get("analysis_static_engine_version") or a.get("analysis_dynamic_engine_version"),json.dumps(config),a.get("analysis_platform"),a.get("analysis_result_str"),None if not is_failed else a.get("analysis_result_str"),verdict,a.get("analysis_verdict"),a.get("analysis_vti_score"),a.get("analysis_verdict_reason_description"),is_failed,vti_counts.behavioural_high,vti_counts.nonbehavioural_high,vti_counts.config_extraction_high,vti_counts.unknown_category_high,vti_counts.total,submission_created,interface_name,PARSER_VERSION)); run=cur.fetchone()["id"]
         for v in vtis:
             stable=str(v.get("id") or "");
             if not stable:continue
@@ -48,11 +51,11 @@ def acquire_cycle_lock(conn):
 
 def existing_analysis_ids(ids):
     if not ids:return set()
-    with connection() as conn,conn.cursor() as cur:cur.execute("SELECT vmray_analysis_id FROM analysis_runs WHERE vmray_analysis_id=ANY(%s) AND NOT is_demo",(list(ids),));return {row["vmray_analysis_id"] for row in cur.fetchall()}
+    with connection() as conn,conn.cursor() as cur:cur.execute("SELECT vmray_analysis_id FROM analysis_runs WHERE vmray_analysis_id=ANY(%s)",(list(ids),));return {row["vmray_analysis_id"] for row in cur.fetchall()}
 
 
-async def process_page(client,items,existing_ids,sample_cache):
-    result={"discovered":len(items),"new":0,"skipped_existing":0,"ingested":0,"updated":0,"failures":[]}
+async def process_page(client,items,existing_ids,sample_cache,submission_cache):
+    result={"discovered":len(items),"new":0,"skipped_existing":0,"ingested":0,"updated":0,"failures":[],"sample_ids":set()}
     for item in items:
         aid=item["analysis_id"]
         if aid in existing_ids:
@@ -61,8 +64,10 @@ async def process_page(client,items,existing_ids,sample_cache):
         try:
             detail=await client.detail(aid);vtis=await client.vtis(aid);source_sample_id=item["analysis_sample_id"]
             if source_sample_id not in sample_cache:sample_cache[source_sample_id]=await client.sample(source_sample_id)
-            sample_pk=ingest(detail,vtis,sample_cache[source_sample_id])
-            result["ingested"]+=1
+            submission_id=(detail.get("data",detail)).get("analysis_submission_id")
+            if submission_id not in submission_cache:submission_cache[submission_id]=await client.submission(submission_id)
+            sample_pk=ingest(detail,vtis,sample_cache[source_sample_id],submission_cache[submission_id])
+            result["ingested"]+=1;result["sample_ids"].add(sample_pk)
         except Exception as exc:result["failures"].append((aid,exc))
     return result
 
@@ -81,7 +86,7 @@ async def collect_once():
                 cur.execute("UPDATE collector_status SET state='running',last_attempt_at=%s WHERE singleton",(now,));conn.commit()
                 cur.execute("SELECT completed_at FROM collection_checkpoints WHERE name='analyses'");row=cur.fetchone();cutoff=(row["completed_at"]-timedelta(hours=settings.overlap_hours)) if row and row["completed_at"] else now-timedelta(hours=24)
                 cur.execute("INSERT INTO collection_checkpoints(name,completed_at) VALUES('analyses',%s) ON CONFLICT(name) DO NOTHING",(cutoff,));conn.commit()
-            client=VMRayClient();max_id=None;seen=set();newest=None;sample_cache={}
+            client=VMRayClient();max_id=None;seen=set();newest=None;sample_cache={};submission_cache={};changed_samples=set()
             while True:
                 rows=await client.analyses(max_id)
                 if not rows:break
@@ -93,7 +98,7 @@ async def collect_once():
                     if completed and completed<cutoff:stop=True;continue
                     candidates.append(item);newest=max(newest,completed) if newest and completed else completed or newest
                 existing=existing_analysis_ids({item["analysis_id"] for item in candidates})
-                page=await process_page(client,candidates,existing,sample_cache)
+                page=await process_page(client,candidates,existing,sample_cache,submission_cache);changed_samples.update(page["sample_ids"])
                 for key in ("discovered","new","skipped_existing","ingested","updated"):totals[key]+=page[key]
                 totals["failed"]+=len(page["failures"])
                 for aid,exc in page["failures"]:
@@ -101,6 +106,7 @@ async def collect_once():
                     with connection() as conn,conn.cursor() as cur:cur.execute("INSERT INTO collection_errors(batch_id,analysis_id,error_type,message) VALUES(%s,%s,%s,%s)",(batch,aid,type(exc).__name__,message));conn.commit()
                 if stop or len(rows)<50:break
                 max_id=min(x["analysis_id"] for x in rows)
+            assign_rounds(changed_samples)
             duration=time.monotonic()-started
             with connection() as conn,conn.cursor() as cur:
                 if newest:cur.execute("INSERT INTO collection_checkpoints(name,completed_at,stable_id) VALUES('analyses',%s,%s) ON CONFLICT(name) DO UPDATE SET completed_at=GREATEST(collection_checkpoints.completed_at,EXCLUDED.completed_at),stable_id=EXCLUDED.stable_id,updated_at=now()",(newest,max(seen) if seen else None))

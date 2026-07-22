@@ -10,7 +10,7 @@ def test_sample_upsert_lowers_first_seen():
 
 
 def test_analysis_conflict_refreshes_mutable_result_fields():
-    conflict = COLLECTOR.split("ON CONFLICT(vmray_analysis_id,is_demo) DO UPDATE SET",1)[1]
+    conflict = COLLECTOR.split("ON CONFLICT(vmray_analysis_id) DO UPDATE SET",1)[1]
     for assignment in ("verdict=EXCLUDED.verdict","status=EXCLUDED.status","failure_state=EXCLUDED.failure_state","completed_at=EXCLUDED.completed_at"):
         assert assignment in conflict
 
