@@ -127,25 +127,43 @@ def duration_lift(window: Window, cohort_type: str):
         return cur.fetchall()
 
 
-def new_vtis_by_arm(window: Window, cohort_type: str, base: int, longer: int):
+def new_vtis_by_arm(window: Window, cohort_type: str, base: int, longer: int, limit=25):
     if base not in (60,120,180) or longer not in (60,120,180) or base >= longer:
         raise ValueError("base and longer must be increasing dynamic arms")
     sql = COHORT_CTE + """
     , base_vtis AS (
-      SELECT DISTINCT r.sample_id,r.round_id,o.vti_definition_id FROM eligible c
+      SELECT r.sample_id,r.round_id,o.vti_definition_id,max(o.score) score FROM eligible c
       JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id AND r.analysis_type='dynamic' AND r.duration_bucket=%s
       JOIN vti_observations o ON o.analysis_run_id=r.id
+      GROUP BY r.sample_id,r.round_id,o.vti_definition_id
     ), longer_vtis AS (
-      SELECT DISTINCT r.sample_id,r.round_id,o.vti_definition_id FROM eligible c
+      SELECT r.sample_id,r.round_id,o.vti_definition_id,max(o.score) score FROM eligible c
       JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id AND r.analysis_type='dynamic' AND r.duration_bucket=%s
       JOIN vti_observations o ON o.analysis_run_id=r.id
+      GROUP BY r.sample_id,r.round_id,o.vti_definition_id
+    ), gained AS (
+      SELECT l.* FROM longer_vtis l LEFT JOIN base_vtis b ON b.sample_id=l.sample_id AND b.round_id=l.round_id
+       AND b.vti_definition_id=l.vti_definition_id WHERE b.vti_definition_id IS NULL
+    ), lost AS (
+      SELECT b.* FROM base_vtis b LEFT JOIN longer_vtis l ON l.sample_id=b.sample_id AND l.round_id=b.round_id
+       AND l.vti_definition_id=b.vti_definition_id WHERE l.vti_definition_id IS NULL
+    ), gained_agg AS (
+      SELECT d.category,d.operation,max(g.score) max_score,count(DISTINCT g.sample_id) samples_gained
+      FROM gained g JOIN vti_definitions d ON d.id=g.vti_definition_id GROUP BY d.category,d.operation
+    ), lost_agg AS (
+      SELECT d.category,d.operation,max(l.score) max_score,count(DISTINCT l.sample_id) samples_lost
+      FROM lost l JOIN vti_definitions d ON d.id=l.vti_definition_id GROUP BY d.category,d.operation
     )
-    SELECT d.stable_id,d.category,d.operation,count(DISTINCT l.sample_id) distinct_samples
-    FROM longer_vtis l JOIN vti_definitions d ON d.id=l.vti_definition_id
-    LEFT JOIN base_vtis b ON b.sample_id=l.sample_id AND b.round_id=l.round_id AND b.vti_definition_id=l.vti_definition_id
-    WHERE b.vti_definition_id IS NULL GROUP BY d.stable_id,d.category,d.operation
-    ORDER BY distinct_samples DESC,d.stable_id
+    SELECT coalesce(g.category,l.category) category,coalesce(g.operation,l.operation) operation,
+      coalesce(g.max_score,l.max_score) severity,coalesce(g.samples_gained,0) samples_gained,
+      coalesce(l.samples_lost,0) samples_lost,coalesce(g.samples_gained,0)-coalesce(l.samples_lost,0) net
+    FROM gained_agg g FULL OUTER JOIN lost_agg l ON coalesce(g.category,'')=coalesce(l.category,'')
+      AND coalesce(g.operation,'')=coalesce(l.operation,'')
+    ORDER BY samples_gained DESC,severity DESC,operation
     """
+    if limit is not None:
+        if not isinstance(limit,int) or limit<1:raise ValueError("limit must be a positive integer or None")
+        sql+=f" LIMIT {limit}"
     with connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (*_cohort_args(window, cohort_type), base, longer))
         return cur.fetchall()
@@ -236,16 +254,26 @@ def cohort_bundle(window: Window, cohort_type: str):
 
         def new_vtis(base,longer):
             cur.execute("""WITH base_vtis AS (
-              SELECT DISTINCT r.sample_id,r.round_id,o.vti_definition_id FROM metric_eligible c JOIN analysis_runs r
+              SELECT r.sample_id,r.round_id,o.vti_definition_id,max(o.score) score FROM metric_eligible c JOIN analysis_runs r
                ON r.sample_id=c.sample_id AND r.round_id=c.round_id AND r.analysis_type='dynamic' AND r.duration_bucket=%s
-               JOIN vti_observations o ON o.analysis_run_id=r.id), longer_vtis AS (
-              SELECT DISTINCT r.sample_id,r.round_id,o.vti_definition_id FROM metric_eligible c JOIN analysis_runs r
+               JOIN vti_observations o ON o.analysis_run_id=r.id GROUP BY r.sample_id,r.round_id,o.vti_definition_id), longer_vtis AS (
+              SELECT r.sample_id,r.round_id,o.vti_definition_id,max(o.score) score FROM metric_eligible c JOIN analysis_runs r
                ON r.sample_id=c.sample_id AND r.round_id=c.round_id AND r.analysis_type='dynamic' AND r.duration_bucket=%s
-               JOIN vti_observations o ON o.analysis_run_id=r.id)
-              SELECT d.stable_id,d.category,d.operation,count(DISTINCT l.sample_id) distinct_samples FROM longer_vtis l
-              JOIN vti_definitions d ON d.id=l.vti_definition_id LEFT JOIN base_vtis b ON b.sample_id=l.sample_id
-               AND b.round_id=l.round_id AND b.vti_definition_id=l.vti_definition_id WHERE b.vti_definition_id IS NULL
-              GROUP BY d.stable_id,d.category,d.operation ORDER BY distinct_samples DESC,d.stable_id LIMIT 25""",(base,longer))
+               JOIN vti_observations o ON o.analysis_run_id=r.id GROUP BY r.sample_id,r.round_id,o.vti_definition_id), gained AS (
+              SELECT l.* FROM longer_vtis l LEFT JOIN base_vtis b ON b.sample_id=l.sample_id AND b.round_id=l.round_id
+               AND b.vti_definition_id=l.vti_definition_id WHERE b.vti_definition_id IS NULL), lost AS (
+              SELECT b.* FROM base_vtis b LEFT JOIN longer_vtis l ON l.sample_id=b.sample_id AND l.round_id=b.round_id
+               AND l.vti_definition_id=b.vti_definition_id WHERE l.vti_definition_id IS NULL), gained_agg AS (
+              SELECT d.category,d.operation,max(g.score) max_score,count(DISTINCT g.sample_id) samples_gained FROM gained g
+               JOIN vti_definitions d ON d.id=g.vti_definition_id GROUP BY d.category,d.operation), lost_agg AS (
+              SELECT d.category,d.operation,max(l.score) max_score,count(DISTINCT l.sample_id) samples_lost FROM lost l
+               JOIN vti_definitions d ON d.id=l.vti_definition_id GROUP BY d.category,d.operation)
+              SELECT coalesce(g.category,l.category) category,coalesce(g.operation,l.operation) operation,
+               coalesce(g.max_score,l.max_score) severity,coalesce(g.samples_gained,0) samples_gained,
+               coalesce(l.samples_lost,0) samples_lost,coalesce(g.samples_gained,0)-coalesce(l.samples_lost,0) net
+              FROM gained_agg g FULL OUTER JOIN lost_agg l ON coalesce(g.category,'')=coalesce(l.category,'')
+               AND coalesce(g.operation,'')=coalesce(l.operation,'')
+              ORDER BY samples_gained DESC,severity DESC,operation LIMIT 25""",(base,longer))
             return cur.fetchall()
 
         return {"exclusions":exclusions,"detection":detection,"lift":lift,"daily":daily,
