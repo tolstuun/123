@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from .config import settings
 from .db import connection
 
 
@@ -45,7 +44,7 @@ evidence AS (
  SELECT c.sample_id,c.round_id,a.arm,count(r.id) run_count,
   bool_or(r.verdict='malicious') malicious,bool_or(r.verdict='suspicious') suspicious,
   bool_or(r.verdict='benign') benign,
-  bool_or(r.vti_behavioural_high>0 OR (%s AND r.vti_static_detector_high>0)) behavioural
+  bool_or(r.vti_behavioural_high>0) behavioural
  FROM eligible c CROSS JOIN arms a LEFT JOIN analysis_runs r
  ON r.sample_id=c.sample_id AND r.round_id=c.round_id
   AND ((a.arm='static' AND r.analysis_type='static') OR
@@ -102,7 +101,7 @@ def _cohort_args(window: Window, cohort_type: str):
 
 def detection_by_arm(window: Window, cohort_type: str):
     with connection() as conn, conn.cursor() as cur:
-        cur.execute(DETECTION_SQL, (*_cohort_args(window, cohort_type), settings.count_detectors_as_behavioural))
+        cur.execute(DETECTION_SQL, _cohort_args(window, cohort_type))
         return cur.fetchall()
 
 
@@ -208,7 +207,7 @@ def cohort_bundle(window: Window, cohort_type: str):
         cur.execute("""WITH arms(arm) AS (VALUES ('static'),('60'),('120'),('180')), evidence AS (
           SELECT c.sample_id,c.round_id,a.arm,bool_or(r.verdict='malicious') malicious,
            bool_or(r.verdict='suspicious') suspicious,bool_or(r.verdict='benign') benign,
-           bool_or(r.vti_behavioural_high>0 OR (%s AND r.vti_static_detector_high>0)) behavioural
+           bool_or(r.vti_behavioural_high>0) behavioural
           FROM metric_eligible c CROSS JOIN arms a LEFT JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id
            AND ((a.arm='static' AND r.analysis_type='static') OR (a.arm<>'static' AND r.analysis_type='dynamic' AND r.duration_bucket=a.arm::int))
           WHERE %s='file' OR a.arm<>'static' GROUP BY c.sample_id,c.round_id,a.arm
@@ -222,7 +221,7 @@ def cohort_bundle(window: Window, cohort_type: str):
           count(*) FILTER(WHERE category='nonbehavioural_suspicious') nonbehavioural_suspicious,
           count(*) FILTER(WHERE category='benign') benign,count(*) FILTER(WHERE category='no_verdict') no_verdict
         FROM classified GROUP BY arm ORDER BY array_position(ARRAY['static','60','120','180'],arm)""",
-          (settings.count_detectors_as_behavioural,cohort_type));detection=cur.fetchall()
+          (cohort_type,));detection=cur.fetchall()
         cur.execute("""WITH arms(arm) AS (VALUES (60),(120),(180)), results AS (
           SELECT c.sample_id,c.round_id,a.arm,CASE WHEN bool_or(r.verdict='malicious') THEN 'malicious'
            WHEN bool_or(r.verdict='suspicious') THEN 'suspicious' WHEN bool_or(r.verdict='benign') THEN 'benign' ELSE 'no_verdict' END result

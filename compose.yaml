@@ -21,7 +21,6 @@ services:
       VMRAY_API_KEY: ${VMRAY_API_KEY}
       VMRAY_VERIFY_TLS: ${VMRAY_VERIFY_TLS:-true}
       VMRAY_POLL_INTERVAL_SECONDS: ${VMRAY_POLL_INTERVAL_SECONDS:-300}
-      COUNT_DETECTORS_AS_BEHAVIOURAL: ${COUNT_DETECTORS_AS_BEHAVIOURAL:-false}
     depends_on: {db: {condition: service_healthy}}
     restart: "no"
   web:
