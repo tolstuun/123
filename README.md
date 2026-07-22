@@ -8,6 +8,7 @@ Copy `.env.example` to `.env`, set strong local values and VMRay credentials, th
 
 ## Commands
 
+- `make recompute` — rebuild persisted VTI counters from normalized observations using the current taxonomy.
 - `make migrate` — apply versioned migrations.
 - `make test` — build and run focused tests.
 - `make collect` — run one collection cycle.

@@ -3,7 +3,7 @@
   <div class="{{ 'warn' if not collector.last_success_at else '' }}"><small>Last collection</small><strong>{{ human_time(collector.last_success_at) }}</strong></div>
   <div class="{{ 'warn' if collector.lag_seconds else '' }}"><small>Lag</small><strong>{{ human_duration(collector.lag_seconds) }}</strong></div>
   <div class="{{ 'warn' if health.null_duration else '' }}"><small>Runs with NULL duration bucket</small><strong>{{ health.null_duration }}</strong></div>
-  <div class="{{ 'warn' if health.unknown_vtis else '' }}"><small>Unknown VTI categories</small><strong>{{ health.unknown_vtis }}</strong></div>
+  <div><small>VTI categories seen</small><a href="/vti-categories"><strong>{{ health.categories_seen }}</strong></a></div>
   <div class="{{ 'warn' if health.failed_runs else '' }}"><small>Failed runs</small><strong>{{ health.failed_runs }}</strong></div>
 </section>
 <section class="spark-row">{% for spark in sparks %}<article class="panel spark-card"><div><strong>{{ spark.label }}</strong><small>Peak {{ spark.peak }}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Daily {{ spark.label }} volume"><line x1="0" y1="36" x2="100" y2="36"/><polyline points="{{ spark.points }}"><title>Daily values: {{ spark['values']|join(', ') }}</title></polyline></svg></article>{% endfor %}</section>

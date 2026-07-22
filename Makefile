@@ -1,10 +1,12 @@
-.PHONY: up down migrate test collect logs backup ready
+.PHONY: up down migrate recompute test collect logs backup ready
 up:
 	docker compose up -d --build
 down:
 	docker compose down
 migrate:
 	docker compose run --rm migrate
+recompute:
+	docker compose run --rm collector python -m app.recompute
 test:
 	docker build -t vmray-analytics:test . && docker run --rm vmray-analytics:test pytest -q
 collect:
