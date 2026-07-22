@@ -31,6 +31,7 @@ class VMRayClient:
     async def detail(self, analysis_id): return (await self.get(f"/rest/analysis/{analysis_id}")).json()
     async def vtis(self, analysis_id): return (await self.get(f"/rest/analysis/{analysis_id}/vtis")).json()
     async def sample(self, sample_id): return (await self.get(f"/rest/sample/{sample_id}")).json()
+    async def submission(self, submission_id): return (await self.get(f"/rest/submission/{submission_id}")).json()
     async def close(self): await self.client.aclose()
 
 

@@ -14,6 +14,7 @@ class Settings:
     vmray_verify_tls: bool = _bool("VMRAY_VERIFY_TLS", True)
     poll_seconds: int = int(os.getenv("VMRAY_POLL_INTERVAL_SECONDS", "300"))
     overlap_hours: int = int(os.getenv("VMRAY_OVERLAP_HOURS", "6"))
+    count_detectors_as_behavioural: bool = _bool("COUNT_DETECTORS_AS_BEHAVIOURAL", False)
     dashboard_username: str = os.getenv("DASHBOARD_USERNAME", "")
     dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "")
     environment: str = os.getenv("APP_ENV", "production")

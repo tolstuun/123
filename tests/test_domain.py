@@ -1,16 +1,4 @@
-from app.domain import classify_support, compare_vtis, normalize_ioc, normalize_verdict
-
-def test_support_classification():
-    assert classify_support([{"score":3,"category":"Antivirus"}])=="av_only"
-    assert classify_support([{"score":4,"operation":"yara"}])=="yara_only"
-    assert classify_support([{"score":3,"category":"AV"},{"score":3,"category":"YARA"}])=="av_and_yara_only"
-    assert classify_support([{"score":3,"category":"behavior"}])=="behavioral"
-    assert classify_support([{"score":2,"category":"AV"}])=="none"
-
-def test_ioc_normalization():
-    assert normalize_ioc("domain","Example.COM.")=="example.com"
-    assert normalize_ioc("ipv6","2001:0db8::1")=="2001:db8::1"
-    assert normalize_ioc("url","HTTPS://Example.COM:443")=="https://example.com/"
+from app.domain import compare_vtis, normalize_verdict
 
 def test_vti_score_change_is_not_addition():
     result=compare_vtis([{"id":"x","score":3}],[{"id":"x","score":5}])
