@@ -1,4 +1,5 @@
 import argparse, asyncio, json, logging, random, time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from .config import settings
 from .db import connection
@@ -28,16 +29,28 @@ def ingest(detail_payload, vti_payload, sample_payload, submission_payload):
     is_failed=a.get("analysis_result_code") not in (1,"1")
     verdict=normalize_verdict(a.get("analysis_verdict"), is_failed)
     vti_counts=classify_vtis(vtis,analysis_id,log)
+    seen_categories=Counter(vti_counts.seen_categories)
     submission_created=parse_time(submission_data.get("submission_created")) or created
     interface_name=submission_data.get("submission_interface_name")
     with connection() as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO samples(vmray_sample_id,sha256,sha1,md5,filename,file_type,first_seen,latest_seen) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(sha256) DO UPDATE SET first_seen=LEAST(samples.first_seen,EXCLUDED.first_seen),latest_seen=GREATEST(samples.latest_seen,EXCLUDED.latest_seen),filename=COALESCE(samples.filename,EXCLUDED.filename) RETURNING id",(a.get("analysis_sample_id"),sha256,a.get("analysis_sample_sha1"),a.get("analysis_sample_md5"),s.get("sample_filename"),s.get("sample_type"),created,created)); sample_pk=cur.fetchone()["id"]
-        cur.execute("INSERT INTO analysis_runs(sample_id,vmray_analysis_id,vmray_sample_id,vmray_submission_id,vmray_job_id,analysis_type,requested_duration_seconds,duration_bucket,created_at,started_at,completed_at,vmray_version,analysis_configuration,target_environment,status,failure_state,verdict,original_verdict,verdict_score,verdict_reason,is_failed,vti_behavioural_high,vti_nonbehavioural_high,vti_config_extraction_high,vti_unknown_category_high,vti_total,submission_created,submission_interface_name,round_id,parser_version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s) ON CONFLICT(vmray_analysis_id) DO UPDATE SET ingested_at=now(),verdict=EXCLUDED.verdict,status=EXCLUDED.status,failure_state=EXCLUDED.failure_state,completed_at=EXCLUDED.completed_at,is_failed=EXCLUDED.is_failed,vti_behavioural_high=EXCLUDED.vti_behavioural_high,vti_nonbehavioural_high=EXCLUDED.vti_nonbehavioural_high,vti_config_extraction_high=EXCLUDED.vti_config_extraction_high,vti_unknown_category_high=EXCLUDED.vti_unknown_category_high,vti_total=EXCLUDED.vti_total RETURNING id",(sample_pk,analysis_id,a.get("analysis_sample_id"),submission,a.get("analysis_job_id"),analysis_type,requested,requested if requested in (60,120,180) else None,created,started,created,a.get("analysis_analyzer_version") or a.get("analysis_static_engine_version") or a.get("analysis_dynamic_engine_version"),json.dumps(config),a.get("analysis_platform"),a.get("analysis_result_str"),None if not is_failed else a.get("analysis_result_str"),verdict,a.get("analysis_verdict"),a.get("analysis_vti_score"),a.get("analysis_verdict_reason_description"),is_failed,vti_counts.behavioural_high,vti_counts.nonbehavioural_high,vti_counts.config_extraction_high,vti_counts.unknown_category_high,vti_counts.total,submission_created,interface_name,PARSER_VERSION)); run=cur.fetchone()["id"]
+        cur.execute("INSERT INTO analysis_runs(sample_id,vmray_analysis_id,vmray_sample_id,vmray_submission_id,vmray_job_id,analysis_type,requested_duration_seconds,duration_bucket,created_at,started_at,completed_at,vmray_version,analysis_configuration,target_environment,status,failure_state,verdict,original_verdict,verdict_score,verdict_reason,is_failed,vti_behavioural_high,vti_nonbehavioural_high,vti_config_extraction_high,vti_total,submission_created,submission_interface_name,round_id,parser_version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s) ON CONFLICT(vmray_analysis_id) DO UPDATE SET ingested_at=now(),verdict=EXCLUDED.verdict,status=EXCLUDED.status,failure_state=EXCLUDED.failure_state,completed_at=EXCLUDED.completed_at,is_failed=EXCLUDED.is_failed,vti_behavioural_high=EXCLUDED.vti_behavioural_high,vti_nonbehavioural_high=EXCLUDED.vti_nonbehavioural_high,vti_config_extraction_high=EXCLUDED.vti_config_extraction_high,vti_total=EXCLUDED.vti_total RETURNING id",(sample_pk,analysis_id,a.get("analysis_sample_id"),submission,a.get("analysis_job_id"),analysis_type,requested,requested if requested in (60,120,180) else None,created,started,created,a.get("analysis_analyzer_version") or a.get("analysis_static_engine_version") or a.get("analysis_dynamic_engine_version"),json.dumps(config),a.get("analysis_platform"),a.get("analysis_result_str"),None if not is_failed else a.get("analysis_result_str"),verdict,a.get("analysis_verdict"),a.get("analysis_vti_score"),a.get("analysis_verdict_reason_description"),is_failed,vti_counts.behavioural_high,vti_counts.nonbehavioural_high,vti_counts.config_extraction_high,vti_counts.total,submission_created,interface_name,PARSER_VERSION)); run=cur.fetchone()["id"]
         for v in vtis:
             stable=str(v.get("id") or "");
             if not stable:continue
             cur.execute("INSERT INTO vti_definitions(stable_id,category,operation,classifications) VALUES(%s,%s,%s,%s) ON CONFLICT(stable_id) DO UPDATE SET category=EXCLUDED.category,operation=EXCLUDED.operation,classifications=EXCLUDED.classifications RETURNING id",(stable,v.get("category"),v.get("operation"),json.dumps(v.get("classifications") or []))); definition=cur.fetchone()["id"]
-            cur.execute("INSERT INTO vti_observations(analysis_run_id,vti_definition_id,score,observed_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(run,definition,v.get("score"),created))
+            cur.execute("INSERT INTO vti_observations(analysis_run_id,vti_definition_id,score,observed_at) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id",(run,definition,v.get("score"),created))
+            inserted=cur.fetchone()
+            try:high_score=int(float(v.get("score") or 0))
+            except (TypeError,ValueError):high_score=0
+            category=str(v.get("category") or "Uncategorized");seen_key=(category,high_score)
+            if inserted and seen_categories[seen_key]:
+                seen_categories[seen_key]-=1
+                cur.execute("""INSERT INTO vti_seen_categories(category,occurrences,max_score,first_seen,last_seen) VALUES(%s,1,%s,%s,%s)
+                  ON CONFLICT(category) DO UPDATE SET occurrences=vti_seen_categories.occurrences+1,
+                  max_score=GREATEST(vti_seen_categories.max_score,EXCLUDED.max_score),
+                  first_seen=LEAST(vti_seen_categories.first_seen,EXCLUDED.first_seen),last_seen=GREATEST(vti_seen_categories.last_seen,EXCLUDED.last_seen)""",
+                  (category,high_score,created,created))
         conn.commit()
     return sample_pk
 

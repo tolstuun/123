@@ -7,24 +7,27 @@ def indicator(category,score=3,analysis_id=42,operation="text is irrelevant"):
     return {"category":category,"operation":operation,"score":score,"analysis_ids":[analysis_id]}
 
 
-def test_category_only_taxonomy_and_counts(caplog):
-    caplog.set_level(logging.WARNING)
+def test_denylist_taxonomy_and_counts(caplog):
     counts=classify_vtis([
         indicator("Antivirus"),indicator("Reputation"),indicator("YARA"),
         indicator("Injection",operation="antivirus yara"),indicator("Extracted Configuration"),
-        indicator("New Category"),indicator("Injection",score=2),
+        indicator("Invented Category",score=4),indicator("Injection",score=2),
     ],42,logging.getLogger("test"))
     assert counts.total==7
     assert counts.nonbehavioural_high==3
-    assert counts.behavioural_high==2
     assert counts.config_extraction_high==1
-    assert counts.unknown_category_high==1
-    assert "New Category" in caplog.text
+    assert counts.behavioural_high==3
+    assert not caplog.records
 
 
-def test_unknown_never_defaults_to_behavioural():
+def test_everything_outside_denylist_is_behavioural():
     counts=classify_vtis([indicator(None)],42,logging.getLogger("test"))
-    assert counts.unknown_category_high==1 and counts.behavioural_high==0
+    assert counts.behavioural_high==1
+
+
+def test_nonbehavioural_is_exactly_av_reputation_yara():
+    counts=classify_vtis([indicator("Antivirus"),indicator("Reputation"),indicator("YARA")],42,logging.getLogger("test"))
+    assert counts.nonbehavioural_high==3 and counts.behavioural_high==0
 
 
 def test_detector_categories_are_behavioural():
@@ -35,6 +38,10 @@ def test_detector_categories_are_behavioural():
 def test_taxonomy_result_has_no_static_detector_field():
     counts=classify_vtis([],42,logging.getLogger("test"))
     assert not hasattr(counts,"static_detector_high")
+
+
+def test_taxonomy_result_has_no_unknown_field():
+    assert not hasattr(classify_vtis([],42),"unknown_category_high")
 
 
 def test_analysis_id_mismatch_stops_ingestion():

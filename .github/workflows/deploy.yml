@@ -36,4 +36,4 @@ jobs:
           USER: ${{ secrets.DEPLOY_USER }}
           PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" 'cd /home/deploy/vmray-analytics && chmod +x ops/*.sh && ./ops/provision-env.sh && docker compose build && docker compose run --rm migrate && docker compose up -d --build --remove-orphans && for i in $(seq 1 30); do curl -fsS http://localhost/ready && break; sleep 5; done && curl -fsS http://localhost/ready && docker compose ps'
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" 'cd /home/deploy/vmray-analytics && chmod +x ops/*.sh && ./ops/provision-env.sh && docker compose build && docker compose run --rm migrate && docker compose run --rm collector python -m app.recompute && docker compose up -d --build --remove-orphans && for i in $(seq 1 30); do curl -fsS http://localhost/ready && break; sleep 5; done && curl -fsS http://localhost/ready && docker compose ps'

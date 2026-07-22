@@ -85,7 +85,7 @@ def overview(request:Request):
     with connection() as conn,conn.cursor() as cur:
         cur.execute("SELECT * FROM collector_status WHERE singleton");collector=cur.fetchone()
         cur.execute("""SELECT count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket IS NULL) null_duration,
-          coalesce(sum(vti_unknown_category_high),0) unknown_vtis,count(*) FILTER(WHERE is_failed) failed_runs
+          count(*) FILTER(WHERE is_failed) failed_runs,(SELECT count(*) FROM vti_seen_categories) categories_seen
           FROM analysis_runs WHERE created_at>=%s AND created_at<%s""",(start,end));health=cur.fetchone()
     cohorts=[cohort_dashboard(window,"file","Files"),cohort_dashboard(window,"url","URLs")]
     combined_daily={}
@@ -111,6 +111,12 @@ def samples(request:Request,q:str="",page:int=1):
     with connection() as conn,conn.cursor() as cur:
         cur.execute(f"{SAMPLE_SUMMARY} WHERE s.latest_seen>=%s {search_sql} GROUP BY s.id ORDER BY s.latest_seen DESC LIMIT %s OFFSET %s",params);rows=cur.fetchall()
     return render(request,"samples.html",{"title":"Samples","samples":rows,"q":q,"page":page})
+
+@app.get("/vti-categories",response_class=HTMLResponse,dependencies=[Depends(auth)])
+def vti_categories(request:Request):
+    with connection() as conn,conn.cursor() as cur:
+        cur.execute("SELECT category,occurrences,max_score,first_seen,last_seen FROM vti_seen_categories ORDER BY occurrences DESC,category");rows=cur.fetchall()
+    return render(request,"table_page.html",{"title":"VTI categories seen","intro":"Passive inventory of high-confidence VTI categories; this table does not influence scoring.","sections":[("Categories",rows)]})
 
 @app.get("/samples/{sample_id}",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def sample_detail(request:Request,sample_id:int):

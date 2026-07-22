@@ -18,8 +18,9 @@ def test_analysis_conflict_refreshes_mutable_result_fields():
 def test_obsolete_columns_are_dropped_and_new_counts_added():
     assert "DROP COLUMN IF EXISTS actual_duration_seconds" in MIGRATION
     assert "DROP COLUMN IF EXISTS support_classification" in MIGRATION
-    for column in ("is_failed","vti_behavioural_high","vti_nonbehavioural_high","vti_config_extraction_high","vti_unknown_category_high","vti_total"):
+    for column in ("is_failed","vti_behavioural_high","vti_nonbehavioural_high","vti_config_extraction_high","vti_total"):
         assert column in MIGRATION and column in COLLECTOR
+    assert "vti_unknown_category_high" not in COLLECTOR
 
 
 def test_static_detector_column_is_not_used_by_collector():
