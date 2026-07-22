@@ -20,11 +20,13 @@ def test_round_assignment_is_deterministic_and_allows_missing_arms():
     assert calculate_rounds(rows)==calculate_rounds(list(reversed(rows)))=={2:1,3:2,4:2}
 
 
-def test_metrics_filter_runs_and_include_missing_and_sample_type():
+def test_metrics_anchor_rounds_then_join_all_runs():
     for sql in (DETECTION_SQL,RESULTS_CTE):
         lowered=sql.lower()
-        assert "r.created_at >= %s" in lowered and "r.created_at < %s" in lowered
-        assert "sample_type" in lowered and "missing" in lowered
+        assert "min(r.created_at) first_run" in lowered
+        assert "first_run >= %s" in lowered and "first_run < %s" in lowered
+        assert lowered.count("created_at >= %s")==0
+        assert "not has_failed and has_60 and has_120 and has_180" in lowered
     assert "cross join arms" in DETECTION_SQL.lower()
 
 

@@ -27,6 +27,12 @@ def test_unknown_never_defaults_to_behavioural():
     assert counts.unknown_category_high==1 and counts.behavioural_high==0
 
 
+def test_static_detectors_are_separate_from_behavioural():
+    counts=classify_vtis([indicator("Computer Vision"),indicator("Heuristics"),indicator("Machine Learning"),indicator("Masquerade")],42,logging.getLogger("test"))
+    assert counts.static_detector_high==4
+    assert counts.behavioural_high==0
+
+
 def test_analysis_id_mismatch_stops_ingestion():
     with pytest.raises(VTIAnalysisMismatch):
         classify_vtis([indicator("Injection",analysis_id=99)],42,logging.getLogger("test"))

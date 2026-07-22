@@ -4,10 +4,18 @@ from app.main import CATEGORIES, aggregate_detection
 
 
 def test_detection_segments_have_fixed_order_and_sum():
-    row={"arm":"static","sample_type":"file","cohort_size":8,**{category:1 for category in CATEGORIES}}
+    row={"arm":"static","cohort_size":6,**{category:1 for category in CATEGORIES}}
     bars=aggregate_detection([row])
     assert list(bars[0]["counts"])==list(CATEGORIES)
-    assert bars[0]["total"]==8
+    assert bars[0]["total"]==6
+
+
+def test_detection_svg_stretches_to_track_and_cohorts_are_split():
+    section=Path("app/templates/cohort_section.html").read_text(encoding="utf-8")
+    overview=Path("app/templates/overview.html").read_text(encoding="utf-8")
+    assert 'viewBox="0 0 100 18" preserveAspectRatio="none"' in section
+    assert "for cohort in cohorts" in overview
+    assert "missing" not in CATEGORIES and "failed" not in CATEGORIES
 
 
 def test_dashboard_is_single_page_and_range_selection_is_complete():

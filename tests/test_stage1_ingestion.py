@@ -20,3 +20,8 @@ def test_obsolete_columns_are_dropped_and_new_counts_added():
     assert "DROP COLUMN IF EXISTS support_classification" in MIGRATION
     for column in ("is_failed","vti_behavioural_high","vti_nonbehavioural_high","vti_config_extraction_high","vti_unknown_category_high","vti_total"):
         assert column in MIGRATION and column in COLLECTOR
+
+
+def test_static_detector_count_is_persisted_by_migration_009():
+    migration=Path("migrations/009_static_detector_vtis.sql").read_text(encoding="utf-8")
+    assert "vti_static_detector_high" in migration and "vti_static_detector_high" in COLLECTOR

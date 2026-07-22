@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .db import connection, open_pool
-from .metrics import Window, detection_by_arm, duration_lift, new_vtis_by_arm
+from .metrics import Window, cohort_bundle, detection_by_arm, duration_lift, new_vtis_by_arm
 from .migrate import migrate
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
@@ -39,32 +39,35 @@ def human_duration(seconds):
     return f"{hours}h {minutes}m" if hours else f"{minutes}m {secs}s" if minutes else f"{secs}s"
 templates.env.globals.update(human_time=human_time,human_duration=human_duration)
 
-CATEGORIES=("behavioural_malicious","behavioural_suspicious","nonbehavioural_malicious","nonbehavioural_suspicious","benign","no_verdict","failed","missing")
-CATEGORY_LABELS={"behavioural_malicious":"Behavioural malicious","behavioural_suspicious":"Behavioural suspicious","nonbehavioural_malicious":"AV/Rep/YARA-only malicious","nonbehavioural_suspicious":"AV/Rep/YARA-only suspicious","benign":"Benign","no_verdict":"No verdict","failed":"Failed","missing":"Missing"}
+CATEGORIES=("behavioural_malicious","behavioural_suspicious","nonbehavioural_malicious","nonbehavioural_suspicious","benign","no_verdict")
+CATEGORY_LABELS={"behavioural_malicious":"Behavioural malicious","behavioural_suspicious":"Behavioural suspicious","nonbehavioural_malicious":"AV/Rep/YARA-only malicious","nonbehavioural_suspicious":"AV/Rep/YARA-only suspicious","benign":"Benign","no_verdict":"No verdict"}
 ARM_LABELS={"static":"Static","60":"60s","120":"120s","180":"180s"}
 
-def aggregate_detection(rows):
+def aggregate_detection(rows,include_static=True):
     output=[]
-    for arm in ("static","60","120","180"):
+    for arm in (("static","60","120","180") if include_static else ("60","120","180")):
         selected=[r for r in rows if r["arm"]==arm]
         counts={category:sum(int(r[category]) for r in selected) for category in CATEGORIES}
         output.append({"arm":arm,"label":ARM_LABELS[arm],"counts":counts,"total":sum(counts.values())})
     return output
 
-def sparklines(cur,start,end,days):
-    cur.execute("""SELECT r.created_at::date AS cohort_day,
-      count(DISTINCT (r.sample_id,r.round_id)) FILTER(WHERE r.analysis_type='static') static,
-      count(DISTINCT (r.sample_id,r.round_id)) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=60) d60,
-      count(DISTINCT (r.sample_id,r.round_id)) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=120) d120,
-      count(DISTINCT (r.sample_id,r.round_id)) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=180) d180
-      FROM analysis_runs r WHERE r.created_at>=%s AND r.created_at<%s GROUP BY 1 ORDER BY 1""",(start,end))
-    indexed={row["cohort_day"]:row for row in cur.fetchall()};dates=[(end-timedelta(days=offset)).date() for offset in range(days-1,-1,-1)]
+def sparklines(rows,end,days):
+    indexed={row["cohort_day"]:row for row in rows};dates=[(end-timedelta(days=offset)).date() for offset in range(days-1,-1,-1)]
     result=[]
     for arm,key in (("static","static"),("60","d60"),("120","d120"),("180","d180")):
         values=[int(indexed.get(day,{}).get(key,0)) for day in dates];peak=max(values,default=0)
         points=" ".join(f"{(i*100/(len(values)-1) if len(values)>1 else 50):.2f},{(36-(value/peak*32) if peak else 36):.2f}" for i,value in enumerate(values))
         result.append({"label":ARM_LABELS[arm],"points":points,"values":values,"peak":peak})
     return result
+
+def cohort_dashboard(window,cohort_type,title):
+    bundle=cohort_bundle(window,cohort_type);lift=bundle["lift"];lift_tables=[]
+    for base,longer in ((60,120),(60,180),(120,180)):
+        pair=[r for r in lift if r["base"]==base and r["longer"]==longer]
+        lift_tables.append({"label":f"{base}s → {longer}s","rows":[{"direction":direction,"samples":sum(r["samples"] for r in pair if r["direction"]==direction)} for direction in ("upgrade","stable","regression")]})
+    return {"type":cohort_type,"title":title,"bars":aggregate_detection(bundle["detection"],cohort_type=="file"),"daily":bundle["daily"],
+      "exclusions":bundle["exclusions"],"lift_tables":lift_tables,
+      "new_60_180":bundle["new_60_180"],"new_60_120":bundle["new_60_120"]}
 
 @app.get("/health")
 def health():return {"status":"alive"}
@@ -78,16 +81,20 @@ def ready():
 
 @app.get("/",response_class=HTMLResponse,dependencies=[Depends(auth)])
 def overview(request:Request):
-    start,end,days=filters(request);window=Window(start,end);raw_detection=detection_by_arm(window)
-    lift=duration_lift(window);new_60_180=new_vtis_by_arm(window,60,180)[:25];new_60_120=new_vtis_by_arm(window,60,120)[:25]
+    start,end,days=filters(request);window=Window(start,end)
     with connection() as conn,conn.cursor() as cur:
         cur.execute("SELECT * FROM collector_status WHERE singleton");collector=cur.fetchone()
         cur.execute("""SELECT count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket IS NULL) null_duration,
           coalesce(sum(vti_unknown_category_high),0) unknown_vtis,count(*) FILTER(WHERE is_failed) failed_runs
           FROM analysis_runs WHERE created_at>=%s AND created_at<%s""",(start,end));health=cur.fetchone()
-        sparks=sparklines(cur,start,end,days)
-    lift_tables=[{"label":f"{base}s → {longer}s","rows":[r for r in lift if r["base"]==base and r["longer"]==longer]} for base,longer in ((60,120),(60,180),(120,180))]
-    return render(request,"overview.html",{"title":"Overview","bars":aggregate_detection(raw_detection),"categories":CATEGORIES,"category_labels":CATEGORY_LABELS,"collector":collector,"health":health,"lift_tables":lift_tables,"new_60_180":new_60_180,"new_60_120":new_60_120,"sparks":sparks})
+    cohorts=[cohort_dashboard(window,"file","Files"),cohort_dashboard(window,"url","URLs")]
+    combined_daily={}
+    for cohort in cohorts:
+        for row in cohort["daily"]:
+            target=combined_daily.setdefault(row["cohort_day"],{"cohort_day":row["cohort_day"],"static":0,"d60":0,"d120":0,"d180":0})
+            for key in ("static","d60","d120","d180"):target[key]+=row[key]
+    sparks=sparklines(list(combined_daily.values()),end,days)
+    return render(request,"overview.html",{"title":"Overview","cohorts":cohorts,"categories":CATEGORIES,"category_labels":CATEGORY_LABELS,"collector":collector,"health":health,"sparks":sparks})
 
 SAMPLE_SUMMARY="""SELECT s.*,
  count(r.id) FILTER(WHERE r.analysis_type='static')::int static_count,
@@ -121,11 +128,12 @@ def export(request:Request,kind:str):
     start,end,_=filters(request);window=Window(start,end)
     if kind=="analysis-runs":
         with connection() as conn,conn.cursor() as cur:cur.execute("SELECT * FROM analysis_runs WHERE created_at>=%s AND created_at<%s ORDER BY created_at",(start,end));rows=cur.fetchall()
-    elif kind=="detection-by-arm":rows=detection_by_arm(window)
-    elif kind=="duration-lift":rows=duration_lift(window)
+    elif kind=="detection-by-arm":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in detection_by_arm(window,cohort)]
+    elif kind=="duration-lift":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in duration_lift(window,cohort)]
     elif kind=="new-vtis":
         rows=[]
-        for base,longer in ((60,120),(60,180),(120,180)):rows.extend({"base":base,"longer":longer,**dict(row)} for row in new_vtis_by_arm(window,base,longer))
+        for cohort in ("file","url"):
+            for base,longer in ((60,120),(60,180),(120,180)):rows.extend({"cohort_type":cohort,"base":base,"longer":longer,**dict(row)} for row in new_vtis_by_arm(window,cohort,base,longer))
     else:raise HTTPException(404)
     out=io.StringIO();writer=csv.DictWriter(out,fieldnames=list(rows[0]) if rows else ["empty"]);writer.writeheader();writer.writerows(rows)
     return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="{kind}.csv"'})

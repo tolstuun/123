@@ -226,6 +226,10 @@ td, th { padding: 9px; border-bottom: 1px solid var(--line); vertical-align: top
 .regression-row { color: var(--orange); background: #211814; }
 .vti-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .vti-grid .panel + .panel { margin-top: 0; }
+.cohort-section { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.cohort-section > h2 { margin-bottom: 6px; font-size: 20px; }
+.exclusion-line { margin-bottom: 12px; color: var(--muted); font-size: 11px; }
+.exclusion-line strong { color: var(--ink); }
 
 @media (max-width: 1180px) {
   .ops-strip { grid-template-columns: repeat(3, 1fr); }
