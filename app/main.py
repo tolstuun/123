@@ -139,7 +139,7 @@ def export(request:Request,kind:str):
     elif kind=="new-vtis":
         rows=[]
         for cohort in ("file","url"):
-            for base,longer in ((60,120),(60,180),(120,180)):rows.extend({"cohort_type":cohort,"base":base,"longer":longer,**dict(row)} for row in new_vtis_by_arm(window,cohort,base,longer))
+            for base,longer in ((60,120),(60,180),(120,180)):rows.extend({"cohort_type":cohort,"base":base,"longer":longer,**dict(row)} for row in new_vtis_by_arm(window,cohort,base,longer,limit=None))
     else:raise HTTPException(404)
     out=io.StringIO();writer=csv.DictWriter(out,fieldnames=list(rows[0]) if rows else ["empty"]);writer.writeheader();writer.writerows(rows)
     return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="{kind}.csv"'})
