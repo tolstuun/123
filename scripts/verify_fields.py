@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import math
+import statistics
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -146,11 +148,18 @@ async def main() -> None:
         result_rows.append(["Verdict null/empty", "—", empty_verdicts])
         table("4. Analysis results and empty verdicts", ["analysis_result_code", "analysis_result_str / measure", "Count"], result_rows)
 
+        semaphore = asyncio.Semaphore(DETAIL_CONCURRENCY)
+
+        async def fetch_vtis(analysis: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+            async with semaphore:
+                payload = payload_data(await client.vtis(analysis["analysis_id"]))
+                indicators = payload.get("threat_indicators", []) if isinstance(payload, dict) else []
+                return analysis, indicators
+
+        vti_results = await asyncio.gather(*(fetch_vtis(analysis) for analysis in analyses[:300]))
         pairs: dict[tuple[str, str], dict[str, Any]] = defaultdict(lambda: {"count": 0, "scores": []})
         raw_indicator = None
-        for analysis in analyses[:30]:
-            payload = payload_data(await client.vtis(analysis["analysis_id"]))
-            indicators = payload.get("threat_indicators", []) if isinstance(payload, dict) else []
+        for _, indicators in vti_results[:30]:
             for indicator in indicators:
                 if raw_indicator is None:
                     raw_indicator = indicator
@@ -185,6 +194,79 @@ async def main() -> None:
             ["analysis_created >= analysis_job_started", ordered, f"{ordered / comparable * 100:.6f}%" if comparable else "0.000000%"],
             ["Ordering violations", violations, f"{violations / comparable * 100:.6f}%" if comparable else "0.000000%"],
         ])
+
+        wide_pairs: dict[tuple[str, str], dict[str, Any]] = defaultdict(
+            lambda: {"count": 0, "full": 0, "static": 0, "high": 0, "scores": []}
+        )
+        categories = set()
+        for analysis, indicators in vti_results:
+            job_type = analysis.get("analysis_job_type")
+            for indicator in indicators:
+                category = str(indicator.get("category") or "null")
+                operation = str(indicator.get("operation") or "null")
+                categories.add(category)
+                values = wide_pairs[(category, operation)]
+                values["count"] += 1
+                values["full"] += int(job_type == "full_analysis")
+                values["static"] += int(job_type == "only_static_analysis")
+                score = indicator.get("score")
+                if isinstance(score, (int, float)):
+                    values["scores"].append(score)
+                    values["high"] += int(score >= 3)
+        wide_rows = []
+        for (category, operation), values in sorted(wide_pairs.items(), key=lambda pair: (-pair[1]["high"], -pair[1]["count"], pair[0])):
+            scores = values["scores"]
+            wide_rows.append([category, operation, values["count"], values["full"], values["static"], values["high"],
+                              min(scores) if scores else "none", max(scores) if scores else "none"])
+        table("7a. VTI taxonomy over 300 analyses", ["Category", "Operation", "Occurrences", "full_analysis", "only_static_analysis", "Score >= 3", "Minimum score", "Maximum score"], wide_rows)
+        table("7b. Distinct VTI categories", ["Category"], [[category] for category in sorted(categories)])
+
+        durations: dict[int, list[float]] = defaultdict(list)
+        for analysis in dynamic:
+            _, config = parse_config(analysis.get("analysis_user_config_config"))
+            try:
+                timeout = int(config.get("timeout"))
+            except (TypeError, ValueError):
+                continue
+            started = parse_time(analysis.get("analysis_job_started"))
+            created = parse_time(analysis.get("analysis_created"))
+            if timeout in (60, 120, 180) and started and created:
+                durations[timeout].append((created - started).total_seconds())
+        duration_rows = []
+        for timeout in (60, 120, 180):
+            values = sorted(durations[timeout])
+            p90 = values[max(0, math.ceil(0.9 * len(values)) - 1)] if values else "none"
+            duration_rows.append([timeout, len(values), min(values) if values else "none",
+                                  statistics.median(values) if values else "none", p90, max(values) if values else "none"])
+        table("8. Timeout fidelity", ["Configured timeout", "Count", "Minimum seconds", "Median seconds", "P90 seconds", "Maximum seconds"], duration_rows)
+
+        arms: dict[Any, dict[str, Any]] = defaultdict(lambda: {"dynamic": 0, "static": 0, "timeouts": []})
+        for analysis in analyses:
+            sample_id = analysis.get("analysis_sample_id")
+            values = arms[sample_id]
+            if is_dynamic(analysis):
+                values["dynamic"] += 1
+                _, config = parse_config(analysis.get("analysis_user_config_config"))
+                try:
+                    values["timeouts"].append(int(config.get("timeout")))
+                except (TypeError, ValueError):
+                    pass
+            elif analysis.get("analysis_job_type") == "only_static_analysis":
+                values["static"] += 1
+        tuple_counts = Counter((values["dynamic"], values["static"]) for values in arms.values())
+        table("9a. Per-sample arm count distribution", ["Dynamic run count", "Static run count", "Samples"],
+              [[dynamic_count, static_count, count] for (dynamic_count, static_count), count in sorted(tuple_counts.items())])
+        incomplete_rows = []
+        expected_timeouts = {60, 120, 180}
+        for sample_id, values in sorted(arms.items(), key=lambda pair: str(pair[0])):
+            if (values["dynamic"], values["static"]) == (3, 3):
+                continue
+            present = sorted(set(values["timeouts"]))
+            missing = sorted(expected_timeouts - set(present))
+            incomplete_rows.append([sample_id, values["dynamic"], values["static"], ", ".join(map(str, present)) or "none", ", ".join(map(str, missing)) or "none"])
+            if len(incomplete_rows) == 20:
+                break
+        table("9b. Samples not having (3, 3)", ["Sample ID", "Dynamic runs", "Static runs", "Timeouts present", "Timeouts missing"], incomplete_rows)
     finally:
         await client.close()
 
