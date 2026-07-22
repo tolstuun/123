@@ -27,10 +27,14 @@ def test_unknown_never_defaults_to_behavioural():
     assert counts.unknown_category_high==1 and counts.behavioural_high==0
 
 
-def test_static_detectors_are_separate_from_behavioural():
+def test_detector_categories_are_behavioural():
     counts=classify_vtis([indicator("Computer Vision"),indicator("Heuristics"),indicator("Machine Learning"),indicator("Masquerade")],42,logging.getLogger("test"))
-    assert counts.static_detector_high==4
-    assert counts.behavioural_high==0
+    assert counts.behavioural_high==4
+
+
+def test_taxonomy_result_has_no_static_detector_field():
+    counts=classify_vtis([],42,logging.getLogger("test"))
+    assert not hasattr(counts,"static_detector_high")
 
 
 def test_analysis_id_mismatch_stops_ingestion():
