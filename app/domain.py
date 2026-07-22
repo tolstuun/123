@@ -19,33 +19,6 @@ def normalize_verdict(value, failed=False):
     return "unknown"
 
 
-def classify_support(vtis, threshold=3):
-    av = yara = behavioral = False
-    for item in vtis:
-        if float(item.get("score") or 0) < threshold:
-            continue
-        tokens = set()
-        for field in ("category", "operation"):
-            tokens.update(re.split(r"[^a-z0-9]+", str(item.get(field, "")).lower()))
-        for value in item.get("classifications") or []:
-            tokens.update(re.split(r"[^a-z0-9]+", str(value).lower()))
-        if "yara" in tokens:
-            yara = True
-        elif "antivirus" in tokens or "av" in tokens:
-            av = True
-        else:
-            behavioral = True
-    if behavioral:
-        return "behavioral"
-    if av and yara:
-        return "av_and_yara_only"
-    if av:
-        return "av_only"
-    if yara:
-        return "yara_only"
-    return "none"
-
-
 def normalize_ioc(kind, value):
     original = unicodedata.normalize("NFKC", str(value)).strip()
     kind = kind.lower().replace("-", "")

@@ -14,10 +14,12 @@ CREATE TABLE analysis_runs (
  id bigserial PRIMARY KEY, sample_id bigint NOT NULL REFERENCES samples(id),
  vmray_analysis_id bigint NOT NULL, vmray_sample_id bigint, vmray_submission_id bigint, vmray_job_id bigint,
  analysis_type text NOT NULL CHECK(analysis_type IN ('static','dynamic','unknown')),
- requested_duration_seconds int, actual_duration_seconds int, duration_bucket smallint,
+ requested_duration_seconds int, duration_bucket smallint,
  created_at timestamptz, started_at timestamptz, completed_at timestamptz, ingested_at timestamptz NOT NULL DEFAULT now(),
  vmray_version text, analysis_configuration jsonb, target_environment text, status text, failure_state text,
- verdict text NOT NULL, original_verdict text, verdict_score numeric, verdict_reason text, support_classification text NOT NULL DEFAULT 'none',
+ verdict text NOT NULL, original_verdict text, verdict_score numeric, verdict_reason text, is_failed boolean NOT NULL DEFAULT false,
+ vti_behavioural_high integer NOT NULL DEFAULT 0, vti_nonbehavioural_high integer NOT NULL DEFAULT 0,
+ vti_config_extraction_high integer NOT NULL DEFAULT 0, vti_unknown_category_high integer NOT NULL DEFAULT 0, vti_total integer NOT NULL DEFAULT 0,
  is_demo boolean NOT NULL DEFAULT false, parser_version text NOT NULL REFERENCES schema_parser_versions(version),
  UNIQUE(vmray_analysis_id, is_demo)
 );

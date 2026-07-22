@@ -136,7 +136,7 @@ EXPORTS={
  "samples":"SELECT s.*,sas.static_count,sas.dynamic_60_count,sas.dynamic_120_count,sas.dynamic_180_count,sas.static_verdict,sas.dynamic_60_verdict,sas.dynamic_120_verdict,sas.dynamic_180_verdict FROM samples s JOIN sample_analysis_summary sas ON sas.sample_id=s.id WHERE s.id=ANY(%s) ORDER BY s.latest_seen DESC", "analysis-runs":"SELECT * FROM analysis_runs WHERE is_demo=%s ORDER BY completed_at DESC",
  "vti-observations":"SELECT o.*,d.stable_id,d.category,d.operation FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.sample_id=ANY(%s)",
  "ioc-observations":"SELECT i.* FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s", "collection-errors":"SELECT * FROM collection_errors ORDER BY occurred_at DESC",
- "verdict-comparisons":"SELECT sample_id,analysis_type,duration_bucket,verdict,support_classification FROM analysis_runs WHERE sample_id=ANY(%s) ORDER BY sample_id,completed_at",
+ "verdict-comparisons":"SELECT sample_id,analysis_type,duration_bucket,verdict,is_failed FROM analysis_runs WHERE sample_id=ANY(%s) ORDER BY sample_id,completed_at",
  "vti-comparisons":"SELECT r.sample_id,r.duration_bucket,d.stable_id,o.score,o.scope,o.artifact_id FROM vti_observations o JOIN vti_definitions d ON d.id=o.vti_definition_id JOIN analysis_runs r ON r.id=o.analysis_run_id WHERE r.sample_id=ANY(%s)",
  "ioc-comparisons":"SELECT r.sample_id,r.duration_bucket,i.ioc_type,i.normalized_value,i.actionable FROM ioc_observations i JOIN analysis_runs r ON r.id=i.analysis_run_id WHERE r.is_demo=%s"
 }

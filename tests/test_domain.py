@@ -1,11 +1,4 @@
-from app.domain import classify_support, compare_vtis, normalize_ioc, normalize_verdict
-
-def test_support_classification():
-    assert classify_support([{"score":3,"category":"Antivirus"}])=="av_only"
-    assert classify_support([{"score":4,"operation":"yara"}])=="yara_only"
-    assert classify_support([{"score":3,"category":"AV"},{"score":3,"category":"YARA"}])=="av_and_yara_only"
-    assert classify_support([{"score":3,"category":"behavior"}])=="behavioral"
-    assert classify_support([{"score":2,"category":"AV"}])=="none"
+from app.domain import compare_vtis, normalize_ioc, normalize_verdict
 
 def test_ioc_normalization():
     assert normalize_ioc("domain","Example.COM.")=="example.com"
