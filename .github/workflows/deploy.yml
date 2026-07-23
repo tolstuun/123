@@ -8,6 +8,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vmray_test
+          POSTGRES_USER: vmray_test
+          POSTGRES_PASSWORD: vmray_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vmray_test -d vmray_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://vmray_test:vmray_test@localhost:5432/vmray_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -156,7 +156,11 @@ submission_arms AS (
  SELECT p.base,p.longer,p.pair_order,a.sample_id,a.round_id,
   CASE p.base WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END base_value,
   CASE p.longer WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END longer_value,
-  CASE WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
+  CASE
+   WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END) IS NULL
+     OR (CASE p.longer WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END) IS NULL
+    THEN 'unknown'
+   WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
    < (CASE p.longer WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
    THEN 'base_first' ELSE 'longer_first' END order_side
  FROM arm_values a CROSS JOIN pairs p
@@ -166,7 +170,7 @@ submission_arms AS (
   count(*) FILTER(WHERE base_value=0 AND longer_value>0) exclusive,
   count(*) FILTER(WHERE base_value>0 AND longer_value=0) crossout
  FROM compared GROUP BY base,longer,pair_order
-), sides(order_side) AS (VALUES ('base_first'),('longer_first')),
+), sides(order_side) AS (VALUES ('base_first'),('longer_first'),('unknown')),
 split AS (
  SELECT p.base,p.longer,p.pair_order,s.order_side,count(c.sample_id) rounds,
   count(c.sample_id) FILTER(WHERE c.base_value>0) behav_base,
@@ -185,39 +189,12 @@ split AS (
  FROM split s JOIN overall o USING(base,longer,pair_order)
 )
 SELECT base,longer,order_side,rounds,behav_base,behav_longer,exclusive,crossout,
- coalesce(round(100.0*exclusive/nullif(behav_longer,0),1),0) pct_coverage_gain,
- coalesce(round(100.0*exclusive/nullif(behav_base,0),1),0) pct_uplift_over_base,
+ round(100.0*exclusive/nullif(behav_longer,0),1) pct_coverage_gain,
+ round(100.0*exclusive/nullif(behav_base,0),1) pct_uplift_over_base,
  underpowered
 FROM coverage
-ORDER BY pair_order,CASE order_side WHEN 'all' THEN 0 WHEN 'base_first' THEN 1 ELSE 2 END
+ORDER BY pair_order,CASE order_side WHEN 'all' THEN 0 WHEN 'base_first' THEN 1 WHEN 'longer_first' THEN 2 ELSE 3 END
 """
-
-
-def behavioural_coverage(window: Window, cohort_type: str):
-    args = _cohort_args(window, cohort_type)
-    with connection() as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS pg_temp.coverage_eligible")
-        cur.execute("""CREATE TEMP TABLE coverage_eligible ON COMMIT DROP AS
-          WITH round_starts AS (
-            SELECT sample_id,round_id,min(created_at) first_run FROM analysis_runs GROUP BY 1,2
-          ), inventory AS (
-            SELECT rs.sample_id,rs.round_id,
-              bool_or(r.analysis_type='static') has_static,
-              bool_or(r.analysis_type='dynamic' AND r.duration_bucket=60) has_60,
-              bool_or(r.analysis_type='dynamic' AND r.duration_bucket=120) has_120,
-              bool_or(r.analysis_type='dynamic' AND r.duration_bucket=180) has_180,
-              bool_or(r.is_failed) has_failed
-            FROM round_starts rs JOIN samples s ON s.id=rs.sample_id
-            JOIN analysis_runs r ON r.sample_id=rs.sample_id AND r.round_id=rs.round_id
-            WHERE rs.first_run>=%s AND rs.first_run<%s
-              AND (CASE WHEN s.file_type='URL' THEN 'url' ELSE 'file' END)=%s
-            GROUP BY rs.sample_id,rs.round_id
-          )
-          SELECT sample_id,round_id FROM inventory
-          WHERE NOT has_failed AND has_60 AND has_120 AND has_180
-            AND (%s='url' OR has_static)""", (*args, cohort_type))
-        cur.execute("WITH eligible AS (SELECT * FROM coverage_eligible), " + BEHAVIOURAL_COVERAGE_CTES)
-        return cur.fetchall()
 
 
 def new_vtis_by_arm(window: Window, cohort_type: str, base: int, longer: int, limit=25):

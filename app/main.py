@@ -65,7 +65,8 @@ def cohort_dashboard(window,cohort_type,title):
     for base,longer in ((60,120),(120,180),(60,180)):
         pair=[r for r in bundle["coverage"] if r["base"]==base and r["longer"]==longer]
         overall=next(r for r in pair if r["order_side"]=="all")
-        splits=[next(r for r in pair if r["order_side"]==side) for side in ("base_first","longer_first")]
+        splits=[r for side in ("base_first","longer_first","unknown") for r in pair
+                if r["order_side"]==side and (side!="unknown" or r["rounds"]>0)]
         coverage_rows.append({"label":f"{base}s → {longer}s","overall":overall,"splits":splits})
     return {"type":cohort_type,"title":title,"bars":aggregate_detection(bundle["detection"],cohort_type=="file"),"daily":bundle["daily"],
       "exclusions":bundle["exclusions"],"coverage_rows":coverage_rows,
