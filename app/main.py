@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .db import connection, open_pool
-from .metrics import Window, cohort_bundle, detection_by_arm, duration_lift, new_vtis_by_arm
+from .metrics import Window, cohort_bundle, detection_by_arm, duration_lift, new_vtis_by_arm, submission_order_fixed_pct
 from .migrate import migrate
 
 app=FastAPI(title="VMRay Analytics",docs_url=None,redoc_url=None,openapi_url=None)
@@ -65,9 +65,7 @@ def cohort_dashboard(window,cohort_type,title):
     for base,longer in ((60,120),(120,180),(60,180)):
         pair=[r for r in bundle["coverage"] if r["base"]==base and r["longer"]==longer]
         overall=next(r for r in pair if r["order_side"]=="all")
-        splits=[r for side in ("base_first","longer_first","unknown") for r in pair
-                if r["order_side"]==side and (side!="unknown" or r["rounds"]>0)]
-        coverage_rows.append({"label":f"{base}s → {longer}s","overall":overall,"splits":splits})
+        coverage_rows.append({"label":f"{base}s → {longer}s","overall":overall})
     return {"type":cohort_type,"title":title,"bars":aggregate_detection(bundle["detection"],cohort_type=="file"),"daily":bundle["daily"],
       "exclusions":bundle["exclusions"],"coverage_rows":coverage_rows,
       "new_60_180":bundle["new_60_180"],"new_60_120":bundle["new_60_120"]}
@@ -90,6 +88,7 @@ def overview(request:Request):
         cur.execute("""SELECT count(*) FILTER(WHERE analysis_type='dynamic' AND duration_bucket IS NULL) null_duration,
           count(*) FILTER(WHERE is_failed) failed_runs,(SELECT count(*) FROM vti_seen_categories) categories_seen
           FROM analysis_runs WHERE created_at>=%s AND created_at<%s""",(start,end));health=cur.fetchone()
+    health["submission_order_fixed_pct"]=submission_order_fixed_pct(window)
     cohorts=[cohort_dashboard(window,"file","Files"),cohort_dashboard(window,"url","URLs")]
     combined_daily={}
     for cohort in cohorts:
