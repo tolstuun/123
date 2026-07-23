@@ -138,6 +138,12 @@ def export(request:Request,kind:str):
     if kind=="analysis-runs":
         with connection() as conn,conn.cursor() as cur:cur.execute("SELECT * FROM analysis_runs WHERE created_at>=%s AND created_at<%s ORDER BY created_at",(start,end));rows=cur.fetchall()
     elif kind=="detection-by-arm":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in detection_by_arm(window,cohort)]
+    elif kind=="behavioural-coverage":
+        columns=("base","longer","order_side","rounds","behav_base","behav_longer","exclusive","crossout","pct_coverage_gain","pct_uplift_over_base","underpowered")
+        rows=[]
+        for cohort in ("file","url"):
+            for row in cohort_bundle(window,cohort)["coverage"]:
+                rows.append({"cohort_type":cohort,**{column:row[column] for column in columns}})
     elif kind=="duration-lift":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in duration_lift(window,cohort)]
     elif kind=="new-vtis":
         rows=[]
