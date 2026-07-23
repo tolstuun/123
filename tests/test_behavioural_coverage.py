@@ -106,7 +106,13 @@ def test_dashboard_replaces_lift_panel_but_keeps_transition_export():
     main = Path("app/main.py").read_text(encoding="utf-8")
     assert "<h2>Behavioural coverage</h2>" in template
     assert "<h2>Duration lift</h2>" not in template
-    assert "crossout" in template
-    assert "underpowered" in template
+    assert "<th>Comparison</th>" in template
+    assert "<th>Missed at the shorter time</th>" in template
+    assert "<th>Samples</th>" in template
+    assert "<th>Order check</th>" in template
+    assert "crossout" not in template.lower()
+    assert "pct_uplift_over_base" not in template
+    assert "/exports/behavioural-coverage.csv" in template
+    assert 'kind=="behavioural-coverage"' in main
     assert 'kind=="duration-lift"' in main
     assert "duration_lift(window,cohort)" in main
