@@ -109,10 +109,19 @@ def test_dashboard_replaces_lift_panel_but_keeps_transition_export():
     assert "<th>Comparison</th>" in template
     assert "<th>Missed at the shorter time</th>" in template
     assert "<th>Samples</th>" in template
-    assert "<th>Order check</th>" in template
+    assert "<th>Order check</th>" not in template
+    assert "row.splits" not in template
     assert "crossout" not in template.lower()
     assert "pct_uplift_over_base" not in template
     assert "/exports/behavioural-coverage.csv" in template
     assert 'kind=="behavioural-coverage"' in main
     assert 'kind=="duration-lift"' in main
     assert "duration_lift(window,cohort)" in main
+
+
+def test_submission_order_caveat_is_in_health_strip():
+    overview = Path("app/templates/overview.html").read_text(encoding="utf-8")
+    main = Path("app/main.py").read_text(encoding="utf-8")
+    assert "<small>Submission order fixed</small>" in overview
+    assert "health.submission_order_fixed_pct > 90" in overview
+    assert "submission_order_fixed_pct(window)" in main

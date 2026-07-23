@@ -5,6 +5,7 @@
   <div class="{{ 'warn' if health.null_duration else '' }}"><small>Runs with NULL duration bucket</small><strong>{{ health.null_duration }}</strong></div>
   <div><small>VTI categories seen</small><a href="/vti-categories"><strong>{{ health.categories_seen }}</strong></a></div>
   <div class="{{ 'warn' if health.failed_runs else '' }}"><small>Failed runs</small><strong>{{ health.failed_runs }}</strong></div>
+  <div class="{{ 'warn' if health.submission_order_fixed_pct is not none and health.submission_order_fixed_pct > 90 else '' }}"><small>Submission order fixed</small><strong>{{ health.submission_order_fixed_pct ~ "%" if health.submission_order_fixed_pct is not none else "—" }}</strong></div>
 </section>
 <section class="spark-row">{% for spark in sparks %}<article class="panel spark-card"><div><strong>{{ spark.label }}</strong><small>Peak {{ spark.peak }}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Daily {{ spark.label }} volume"><line x1="0" y1="36" x2="100" y2="36"/><polyline points="{{ spark.points }}"><title>Daily values: {{ spark['values']|join(', ') }}</title></polyline></svg></article>{% endfor %}</section>
 {% for cohort in cohorts %}{% include "cohort_section.html" %}{% endfor %}

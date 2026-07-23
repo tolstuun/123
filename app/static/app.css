@@ -193,7 +193,7 @@ td, th { padding: 9px; border-bottom: 1px solid var(--line); vertical-align: top
 /* Consolidated analytics dashboard */
 .health-line {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
   margin-bottom: 12px;
   overflow: hidden;
   border: 1px solid var(--line);

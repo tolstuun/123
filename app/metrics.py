@@ -262,6 +262,39 @@ def daily_complete_rounds(window: Window):
         return cur.fetchall()
 
 
+def submission_order_fixed_pct(window: Window):
+    """Share of complete rounds whose dynamic arms were submitted 60s, 120s, then 180s."""
+    sql = """
+    WITH round_starts AS (
+      SELECT sample_id,round_id,min(created_at) first_run FROM analysis_runs GROUP BY 1,2
+    ), inventory AS (
+      SELECT rs.sample_id,rs.round_id,s.file_type,
+       bool_or(r.analysis_type='static') has_static,
+       bool_or(r.analysis_type='dynamic' AND r.duration_bucket=60) has_60,
+       bool_or(r.analysis_type='dynamic' AND r.duration_bucket=120) has_120,
+       bool_or(r.analysis_type='dynamic' AND r.duration_bucket=180) has_180,
+       bool_or(r.is_failed) has_failed,
+       min(r.submission_created) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=60) submitted_60,
+       min(r.submission_created) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=120) submitted_120,
+       min(r.submission_created) FILTER(WHERE r.analysis_type='dynamic' AND r.duration_bucket=180) submitted_180
+      FROM round_starts rs JOIN samples s ON s.id=rs.sample_id
+      JOIN analysis_runs r ON r.sample_id=rs.sample_id AND r.round_id=rs.round_id
+      WHERE rs.first_run >= %s AND rs.first_run < %s
+      GROUP BY rs.sample_id,rs.round_id,s.file_type
+    ), eligible AS (
+      SELECT * FROM inventory WHERE NOT has_failed AND has_60 AND has_120 AND has_180
+       AND (file_type='URL' OR has_static)
+    )
+    SELECT round(100.0*count(*) FILTER(
+      WHERE submitted_60 < submitted_120 AND submitted_120 < submitted_180
+    )/nullif(count(*),0),1) fixed_pct
+    FROM eligible
+    """
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (window.start, window.end))
+        return cur.fetchone()["fixed_pct"]
+
+
 def cohort_bundle(window: Window, cohort_type: str):
     """Build the round inventory once for all dashboard panels in one transaction."""
     _cohort_args(window, cohort_type)
