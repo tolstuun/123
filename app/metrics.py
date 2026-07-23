@@ -152,8 +152,19 @@ submission_arms AS (
  LEFT JOIN ordered_submissions os ON os.sample_id=r.sample_id AND os.round_id=r.round_id
   AND os.vmray_submission_id=r.vmray_submission_id AND os.arm=r.duration_bucket
  GROUP BY c.sample_id,c.round_id
+), monotonic AS (
+ SELECT * FROM arm_values
+ WHERE (coalesce(behav_60,0)>0)::int <= (coalesce(behav_120,0)>0)::int
+   AND (coalesce(behav_120,0)>0)::int <= (coalesce(behav_180,0)>0)::int
+), reverted AS (
+ SELECT count(*) reverted_rounds FROM arm_values a
+ LEFT JOIN monotonic m USING(sample_id,round_id) WHERE m.sample_id IS NULL
+), scopes(scope) AS (VALUES ('unfiltered'),('monotonic')),
+scoped AS (
+ SELECT 'unfiltered'::text scope,a.* FROM arm_values a
+ UNION ALL SELECT 'monotonic'::text scope,m.* FROM monotonic m
 ), compared AS (
- SELECT p.base,p.longer,p.pair_order,a.sample_id,a.round_id,
+ SELECT a.scope,p.base,p.longer,p.pair_order,a.sample_id,a.round_id,
   CASE p.base WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END base_value,
   CASE p.longer WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END longer_value,
   CASE
@@ -163,37 +174,50 @@ submission_arms AS (
    WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
    < (CASE p.longer WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
    THEN 'base_first' ELSE 'longer_first' END order_side
- FROM arm_values a CROSS JOIN pairs p
+ FROM scoped a CROSS JOIN pairs p
 ), overall AS (
- SELECT base,longer,pair_order,count(*) rounds,
-  count(*) FILTER(WHERE base_value>0) behav_base,count(*) FILTER(WHERE longer_value>0) behav_longer,
-  count(*) FILTER(WHERE base_value=0 AND longer_value>0) exclusive,
-  count(*) FILTER(WHERE base_value>0 AND longer_value=0) crossout
- FROM compared GROUP BY base,longer,pair_order
-), sides(order_side) AS (VALUES ('base_first'),('longer_first'),('unknown')),
-split AS (
- SELECT p.base,p.longer,p.pair_order,s.order_side,count(c.sample_id) rounds,
+ SELECT s.scope,p.base,p.longer,p.pair_order,count(c.sample_id) rounds,
   count(c.sample_id) FILTER(WHERE c.base_value>0) behav_base,
   count(c.sample_id) FILTER(WHERE c.longer_value>0) behav_longer,
   count(c.sample_id) FILTER(WHERE c.base_value=0 AND c.longer_value>0) exclusive,
   count(c.sample_id) FILTER(WHERE c.base_value>0 AND c.longer_value=0) crossout
- FROM pairs p CROSS JOIN sides s LEFT JOIN compared c
-  ON c.base=p.base AND c.longer=p.longer AND c.order_side=s.order_side
- GROUP BY p.base,p.longer,p.pair_order,s.order_side
+ FROM scopes s CROSS JOIN pairs p LEFT JOIN compared c
+  ON c.scope=s.scope AND c.base=p.base AND c.longer=p.longer
+ GROUP BY s.scope,p.base,p.longer,p.pair_order
+), sides(order_side) AS (VALUES ('base_first'),('longer_first'),('unknown')),
+split AS (
+ SELECT sc.scope,p.base,p.longer,p.pair_order,s.order_side,count(c.sample_id) rounds,
+  count(c.sample_id) FILTER(WHERE c.base_value>0) behav_base,
+  count(c.sample_id) FILTER(WHERE c.longer_value>0) behav_longer,
+  count(c.sample_id) FILTER(WHERE c.base_value=0 AND c.longer_value>0) exclusive,
+  count(c.sample_id) FILTER(WHERE c.base_value>0 AND c.longer_value=0) crossout
+ FROM scopes sc CROSS JOIN pairs p CROSS JOIN sides s LEFT JOIN compared c
+  ON c.scope=sc.scope AND c.base=p.base AND c.longer=p.longer AND c.order_side=s.order_side
+ GROUP BY sc.scope,p.base,p.longer,p.pair_order,s.order_side
+), denominators AS (
+ SELECT sc.scope,count(s.sample_id) FILTER(WHERE coalesce(s.behav_180,0)>0) behav_at_180
+ FROM scopes sc LEFT JOIN scoped s ON s.scope=sc.scope GROUP BY sc.scope
 ), coverage AS (
- SELECT o.base,o.longer,o.pair_order,'all'::text order_side,o.rounds,o.behav_base,
+ SELECT o.scope,o.base,o.longer,o.pair_order,'all'::text order_side,o.rounds,o.behav_base,
   o.behav_longer,o.exclusive,o.crossout,false underpowered FROM overall o
  UNION ALL
- SELECT s.base,s.longer,s.pair_order,s.order_side,s.rounds,s.behav_base,s.behav_longer,
+ SELECT s.scope,s.base,s.longer,s.pair_order,s.order_side,s.rounds,s.behav_base,s.behav_longer,
   s.exclusive,s.crossout,(s.rounds < o.rounds * 0.10) underpowered
- FROM split s JOIN overall o USING(base,longer,pair_order)
+ FROM split s JOIN overall o USING(scope,base,longer,pair_order)
 )
-SELECT base,longer,order_side,rounds,behav_base,behav_longer,exclusive,crossout,
- round(100.0*exclusive/nullif(behav_longer,0),1) pct_coverage_gain,
- round(100.0*exclusive/nullif(behav_base,0),1) pct_uplift_over_base,
- underpowered
-FROM coverage
-ORDER BY pair_order,CASE order_side WHEN 'all' THEN 0 WHEN 'base_first' THEN 1 WHEN 'longer_first' THEN 2 ELSE 3 END
+SELECT c.scope,c.base,c.longer,c.order_side,c.rounds,c.behav_base,c.behav_longer,
+ c.exclusive,c.crossout,d.behav_at_180,
+ CASE WHEN c.scope='monotonic' AND c.order_side='all' AND c.base=60 AND c.longer=180 THEN
+   100.0*(SELECT c1.exclusive FROM coverage c1 WHERE c1.scope=c.scope
+    AND c1.base=60 AND c1.longer=120 AND c1.order_side=c.order_side)/nullif(d.behav_at_180,0)
+   + 100.0*(SELECT c2.exclusive FROM coverage c2 WHERE c2.scope=c.scope
+    AND c2.base=120 AND c2.longer=180 AND c2.order_side=c.order_side)/nullif(d.behav_at_180,0)
+  ELSE 100.0*c.exclusive/nullif(d.behav_at_180,0) END pct_of_180_coverage,
+ round(100.0*c.exclusive/nullif(c.behav_base,0),1) pct_uplift_over_base,
+ c.underpowered,r.reverted_rounds
+FROM coverage c JOIN denominators d USING(scope) CROSS JOIN reverted r
+ORDER BY CASE c.scope WHEN 'monotonic' THEN 0 ELSE 1 END,c.pair_order,
+ CASE c.order_side WHEN 'all' THEN 0 WHEN 'base_first' THEN 1 WHEN 'longer_first' THEN 2 ELSE 3 END
 """
 
 

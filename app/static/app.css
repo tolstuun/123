@@ -204,7 +204,8 @@ td, th { padding: 9px; border-bottom: 1px solid var(--line); vertical-align: top
 .health-line > div:last-child { border-right: 0; }
 .health-line small, .spark-card small { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .health-line strong { font-size: 12px; }
-.health-line .warn { background: #2b2116; color: var(--yellow); }
+  .health-line .warn { background: #2b2116; color: var(--yellow); }
+  .coverage-total td { border-top: 2px solid var(--muted); }
 .detection-bars { display: grid; gap: 12px; margin-top: 16px; }
 .detection-bar { display: grid; grid-template-columns: 72px minmax(0, 1fr) 48px; gap: 10px; align-items: center; }
 .detection-bar svg { display: block; width: 100%; height: 30px; background: #17272a; border-radius: 4px; }
