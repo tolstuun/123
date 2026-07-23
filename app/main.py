@@ -62,12 +62,14 @@ def sparklines(rows,end,days):
 
 def cohort_dashboard(window,cohort_type,title):
     bundle=cohort_bundle(window,cohort_type);coverage_rows=[]
-    for base,longer in ((60,120),(120,180),(60,180)):
-        pair=[r for r in bundle["coverage"] if r["base"]==base and r["longer"]==longer]
+    labels={(60,120):"First seen at 120s",(120,180):"First seen at 180s",(60,180):"Total beyond 60s"}
+    for base,longer in labels:
+        pair=[r for r in bundle["coverage"] if r["scope"]=="monotonic" and r["base"]==base and r["longer"]==longer]
         overall=next(r for r in pair if r["order_side"]=="all")
-        coverage_rows.append({"label":f"{base}s → {longer}s","overall":overall})
+        coverage_rows.append({"label":labels[(base,longer)],"overall":overall,"is_total":(base,longer)==(60,180)})
     return {"type":cohort_type,"title":title,"bars":aggregate_detection(bundle["detection"],cohort_type=="file"),"daily":bundle["daily"],
       "exclusions":bundle["exclusions"],"coverage_rows":coverage_rows,
+      "reverted_rounds":coverage_rows[0]["overall"]["reverted_rounds"],
       "new_60_180":bundle["new_60_180"],"new_60_120":bundle["new_60_120"]}
 
 @app.get("/health")
@@ -138,11 +140,12 @@ def export(request:Request,kind:str):
         with connection() as conn,conn.cursor() as cur:cur.execute("SELECT * FROM analysis_runs WHERE created_at>=%s AND created_at<%s ORDER BY created_at",(start,end));rows=cur.fetchall()
     elif kind=="detection-by-arm":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in detection_by_arm(window,cohort)]
     elif kind=="behavioural-coverage":
-        columns=("base","longer","order_side","rounds","behav_base","behav_longer","exclusive","crossout","pct_coverage_gain","pct_uplift_over_base","underpowered")
+        columns=("base","longer","order_side","rounds","behav_base","behav_longer","exclusive","crossout","behav_at_180","pct_of_180_coverage","pct_uplift_over_base","underpowered")
         rows=[]
         for cohort in ("file","url"):
             for row in cohort_bundle(window,cohort)["coverage"]:
-                rows.append({"cohort_type":cohort,**{column:row[column] for column in columns}})
+                if row["scope"]=="unfiltered":
+                    rows.append({"cohort_type":cohort,**{column:row[column] for column in columns}})
     elif kind=="duration-lift":rows=[{"cohort_type":cohort,**dict(row)} for cohort in ("file","url") for row in duration_lift(window,cohort)]
     elif kind=="new-vtis":
         rows=[]

@@ -28,22 +28,24 @@ def coverage_rows():
                 analysis_type text NOT NULL,is_failed boolean NOT NULL DEFAULT false,
                 vti_behavioural_high integer NOT NULL DEFAULT 0
             )""")
-            cur.executemany("INSERT INTO samples(id,file_type) VALUES(%s,'file')", [(i,) for i in range(1, 7)])
+            cur.executemany("INSERT INTO samples(id,file_type) VALUES(%s,'file')", [(i,) for i in range(1, 9)])
 
             rows = []
-            for sample_id in range(1, 7):
+            patterns = {
+                1: (1, 1, 1),  # behavioural at every arm
+                2: (0, 1, 1),  # first seen at 120
+                3: (0, 0, 1),  # first seen at 180
+                4: (0, 0, 0),  # no behavioural evidence
+                5: (1, 1, 1),  # incomplete: no 120
+                6: (1, 1, 1),  # complete but failed
+                7: (0, 1, 0),  # reverted
+                8: (1, 0, 1),  # reverted
+            }
+            for sample_id in range(1, 9):
                 rows.append((sample_id, sample_id, 1000 + sample_id, None, start, start, "static", False, 0))
-                values = {
-                    1: (1, 1),  # behavioural at both
-                    2: (0, 1),  # exclusive at longer
-                    3: (1, 0),  # crossout
-                    4: (0, 0),  # neither
-                    5: (1, 1),  # incomplete: no 120
-                    6: (1, 1),  # complete but failed
-                }[sample_id]
                 durations = (60, 180) if sample_id == 5 else (60, 120, 180)
                 for index, duration in enumerate(durations):
-                    behavioural = values[0] if duration == 60 else values[1] if duration == 120 else 0
+                    behavioural = patterns[sample_id][(60, 120, 180).index(duration)]
                     submission_id = None if sample_id == 4 and duration == 60 else sample_id * 10 + index
                     rows.append((
                         sample_id, sample_id, submission_id, duration,
@@ -63,23 +65,47 @@ def coverage_rows():
     return result
 
 
-def test_behavioural_crossings_are_counted_without_netting(coverage_rows):
-    overall = next(
-        row for row in coverage_rows
-        if row["base"] == 60 and row["longer"] == 120 and row["order_side"] == "all"
-    )
-    assert overall["rounds"] == 4
-    assert overall["behav_base"] == 2
-    assert overall["behav_longer"] == 2
-    assert overall["exclusive"] == 1
-    assert overall["crossout"] == 1
-    assert overall["pct_coverage_gain"] == Decimal("50.0")
-    assert overall["pct_uplift_over_base"] == Decimal("50.0")
+def overall(coverage_rows, base, longer, scope="monotonic"):
+    return next(row for row in coverage_rows if row["scope"] == scope and row["base"] == base
+                and row["longer"] == longer and row["order_side"] == "all")
+
+
+def test_reverted_rounds_are_excluded_from_monotonic_coverage(coverage_rows):
+    row = overall(coverage_rows, 60, 120)
+    assert row["rounds"] == 4
+    assert row["reverted_rounds"] == 2
+    assert row["behav_base"] == 1
+    assert row["behav_longer"] == 2
+    assert row["exclusive"] == 1
+    assert row["crossout"] == 0
+    unfiltered = overall(coverage_rows, 60, 120, "unfiltered")
+    assert unfiltered["rounds"] == 6
+    assert unfiltered["exclusive"] == 2
+    assert unfiltered["crossout"] == 1
+
+
+def test_coverage_is_a_single_denominator_decomposition(coverage_rows):
+    first_120 = overall(coverage_rows, 60, 120)
+    first_180 = overall(coverage_rows, 120, 180)
+    total = overall(coverage_rows, 60, 180)
+    assert first_120["behav_at_180"] == first_180["behav_at_180"] == total["behav_at_180"] == 3
+    assert first_120["exclusive"] + first_180["exclusive"] == total["exclusive"] == 2
+    assert first_120["pct_of_180_coverage"] + first_180["pct_of_180_coverage"] == total["pct_of_180_coverage"]
+    assert total["pct_of_180_coverage"].quantize(Decimal("0.000001")) == Decimal("66.666667")
+
+
+def test_unfiltered_crossings_are_counted_without_netting(coverage_rows):
+    row = overall(coverage_rows, 60, 120, "unfiltered")
+    assert row["rounds"] == 6
+    assert row["exclusive"] == 2
+    assert row["crossout"] == 1
+    assert row["exclusive"] - row["crossout"] == 1
 
 
 def test_order_splits_include_unknown_and_sum_to_overall(coverage_rows):
     for base, longer in ((60, 120), (120, 180), (60, 180)):
-        pair = [row for row in coverage_rows if row["base"] == base and row["longer"] == longer]
+        pair = [row for row in coverage_rows if row["scope"] == "unfiltered"
+                and row["base"] == base and row["longer"] == longer]
         overall = next(row for row in pair if row["order_side"] == "all")
         splits = [row for row in pair if row["order_side"] != "all"]
         assert {row["order_side"] for row in splits} == {"base_first", "longer_first", "unknown"}
@@ -90,15 +116,6 @@ def test_order_splits_include_unknown_and_sum_to_overall(coverage_rows):
         if row["base"] == 60 and row["longer"] == 120 and row["order_side"] == "unknown"
     )
     assert unknown["rounds"] == 1
-
-
-def test_empty_percentage_denominators_are_null(coverage_rows):
-    overall = next(
-        row for row in coverage_rows
-        if row["base"] == 120 and row["longer"] == 180 and row["order_side"] == "all"
-    )
-    assert overall["behav_longer"] == 0
-    assert overall["pct_coverage_gain"] is None
 
 
 def test_dashboard_replaces_lift_panel_but_keeps_transition_export():
@@ -113,6 +130,8 @@ def test_dashboard_replaces_lift_panel_but_keeps_transition_export():
     assert "row.splits" not in template
     assert "crossout" not in template.lower()
     assert "pct_uplift_over_base" not in template
+    assert "pct_of_180_coverage" in template
+    assert "rounds excluded: behavioural evidence appeared then disappeared across arms" in template
     assert "/exports/behavioural-coverage.csv" in template
     assert 'kind=="behavioural-coverage"' in main
     assert 'kind=="duration-lift"' in main
