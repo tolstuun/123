@@ -61,12 +61,15 @@ def sparklines(rows,end,days):
     return result
 
 def cohort_dashboard(window,cohort_type,title):
-    bundle=cohort_bundle(window,cohort_type);lift=bundle["lift"];lift_tables=[]
-    for base,longer in ((60,120),(60,180),(120,180)):
-        pair=[r for r in lift if r["base"]==base and r["longer"]==longer]
-        lift_tables.append({"label":f"{base}s → {longer}s","rows":[{"direction":direction,"samples":sum(r["samples"] for r in pair if r["direction"]==direction)} for direction in ("upgrade","stable","regression")]})
+    bundle=cohort_bundle(window,cohort_type);coverage_rows=[]
+    for base,longer in ((60,120),(120,180),(60,180)):
+        pair=[r for r in bundle["coverage"] if r["base"]==base and r["longer"]==longer]
+        overall=next(r for r in pair if r["order_side"]=="all")
+        splits=[r for side in ("base_first","longer_first","unknown") for r in pair
+                if r["order_side"]==side and (side!="unknown" or r["rounds"]>0)]
+        coverage_rows.append({"label":f"{base}s → {longer}s","overall":overall,"splits":splits})
     return {"type":cohort_type,"title":title,"bars":aggregate_detection(bundle["detection"],cohort_type=="file"),"daily":bundle["daily"],
-      "exclusions":bundle["exclusions"],"lift_tables":lift_tables,
+      "exclusions":bundle["exclusions"],"coverage_rows":coverage_rows,
       "new_60_180":bundle["new_60_180"],"new_60_120":bundle["new_60_120"]}
 
 @app.get("/health")

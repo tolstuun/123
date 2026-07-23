@@ -32,7 +32,7 @@ WITH round_starts AS (
  GROUP BY a.sample_id,a.round_id,a.first_run,a.cohort_type
 ), selected AS (
  SELECT * FROM inventory WHERE cohort_type=%s
-), eligible AS (
+), eligible AS MATERIALIZED (
  SELECT * FROM selected WHERE NOT has_failed AND has_60 AND has_120 AND has_180
   AND (cohort_type='url' OR has_static)
 )
@@ -125,6 +125,76 @@ def duration_lift(window: Window, cohort_type: str):
     with connection() as conn, conn.cursor() as cur:
         cur.execute(sql, _cohort_args(window, cohort_type))
         return cur.fetchall()
+
+
+BEHAVIOURAL_COVERAGE_CTES = """
+pairs(base,longer,pair_order) AS (VALUES (60,120,1),(120,180,2),(60,180,3)),
+submission_arms AS (
+ SELECT DISTINCT r.sample_id,r.round_id,r.vmray_submission_id,r.duration_bucket arm,r.submission_created
+ FROM eligible c JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id
+ WHERE r.analysis_type='dynamic' AND r.duration_bucket IN (60,120,180)
+), ordered_submissions AS (
+ SELECT sa.*,row_number() OVER (
+  PARTITION BY sa.sample_id,sa.round_id
+  ORDER BY sa.submission_created NULLS LAST,sa.vmray_submission_id,sa.arm
+ ) submission_order
+ FROM submission_arms sa
+), arm_values AS (
+ SELECT c.sample_id,c.round_id,
+  max(r.vti_behavioural_high) FILTER(WHERE r.duration_bucket=60) behav_60,
+  max(r.vti_behavioural_high) FILTER(WHERE r.duration_bucket=120) behav_120,
+  max(r.vti_behavioural_high) FILTER(WHERE r.duration_bucket=180) behav_180,
+  min(os.submission_order) FILTER(WHERE os.arm=60) order_60,
+  min(os.submission_order) FILTER(WHERE os.arm=120) order_120,
+  min(os.submission_order) FILTER(WHERE os.arm=180) order_180
+ FROM eligible c JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id
+  AND r.analysis_type='dynamic' AND r.duration_bucket IN (60,120,180)
+ LEFT JOIN ordered_submissions os ON os.sample_id=r.sample_id AND os.round_id=r.round_id
+  AND os.vmray_submission_id=r.vmray_submission_id AND os.arm=r.duration_bucket
+ GROUP BY c.sample_id,c.round_id
+), compared AS (
+ SELECT p.base,p.longer,p.pair_order,a.sample_id,a.round_id,
+  CASE p.base WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END base_value,
+  CASE p.longer WHEN 60 THEN a.behav_60 WHEN 120 THEN a.behav_120 ELSE a.behav_180 END longer_value,
+  CASE
+   WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END) IS NULL
+     OR (CASE p.longer WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END) IS NULL
+    THEN 'unknown'
+   WHEN (CASE p.base WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
+   < (CASE p.longer WHEN 60 THEN a.order_60 WHEN 120 THEN a.order_120 ELSE a.order_180 END)
+   THEN 'base_first' ELSE 'longer_first' END order_side
+ FROM arm_values a CROSS JOIN pairs p
+), overall AS (
+ SELECT base,longer,pair_order,count(*) rounds,
+  count(*) FILTER(WHERE base_value>0) behav_base,count(*) FILTER(WHERE longer_value>0) behav_longer,
+  count(*) FILTER(WHERE base_value=0 AND longer_value>0) exclusive,
+  count(*) FILTER(WHERE base_value>0 AND longer_value=0) crossout
+ FROM compared GROUP BY base,longer,pair_order
+), sides(order_side) AS (VALUES ('base_first'),('longer_first'),('unknown')),
+split AS (
+ SELECT p.base,p.longer,p.pair_order,s.order_side,count(c.sample_id) rounds,
+  count(c.sample_id) FILTER(WHERE c.base_value>0) behav_base,
+  count(c.sample_id) FILTER(WHERE c.longer_value>0) behav_longer,
+  count(c.sample_id) FILTER(WHERE c.base_value=0 AND c.longer_value>0) exclusive,
+  count(c.sample_id) FILTER(WHERE c.base_value>0 AND c.longer_value=0) crossout
+ FROM pairs p CROSS JOIN sides s LEFT JOIN compared c
+  ON c.base=p.base AND c.longer=p.longer AND c.order_side=s.order_side
+ GROUP BY p.base,p.longer,p.pair_order,s.order_side
+), coverage AS (
+ SELECT o.base,o.longer,o.pair_order,'all'::text order_side,o.rounds,o.behav_base,
+  o.behav_longer,o.exclusive,o.crossout,false underpowered FROM overall o
+ UNION ALL
+ SELECT s.base,s.longer,s.pair_order,s.order_side,s.rounds,s.behav_base,s.behav_longer,
+  s.exclusive,s.crossout,(s.rounds < o.rounds * 0.10) underpowered
+ FROM split s JOIN overall o USING(base,longer,pair_order)
+)
+SELECT base,longer,order_side,rounds,behav_base,behav_longer,exclusive,crossout,
+ round(100.0*exclusive/nullif(behav_longer,0),1) pct_coverage_gain,
+ round(100.0*exclusive/nullif(behav_base,0),1) pct_uplift_over_base,
+ underpowered
+FROM coverage
+ORDER BY pair_order,CASE order_side WHEN 'all' THEN 0 WHEN 'base_first' THEN 1 WHEN 'longer_first' THEN 2 ELSE 3 END
+"""
 
 
 def new_vtis_by_arm(window: Window, cohort_type: str, base: int, longer: int, limit=25):
@@ -240,17 +310,8 @@ def cohort_bundle(window: Window, cohort_type: str):
           count(*) FILTER(WHERE category='benign') benign,count(*) FILTER(WHERE category='no_verdict') no_verdict
         FROM classified GROUP BY arm ORDER BY array_position(ARRAY['static','60','120','180'],arm)""",
           (cohort_type,));detection=cur.fetchall()
-        cur.execute("""WITH arms(arm) AS (VALUES (60),(120),(180)), results AS (
-          SELECT c.sample_id,c.round_id,a.arm,CASE WHEN bool_or(r.verdict='malicious') THEN 'malicious'
-           WHEN bool_or(r.verdict='suspicious') THEN 'suspicious' WHEN bool_or(r.verdict='benign') THEN 'benign' ELSE 'no_verdict' END result
-          FROM metric_eligible c CROSS JOIN arms a JOIN analysis_runs r ON r.sample_id=c.sample_id AND r.round_id=c.round_id
-           AND r.analysis_type='dynamic' AND r.duration_bucket=a.arm GROUP BY c.sample_id,c.round_id,a.arm
-        ), pairs(base,longer) AS (VALUES (60,120),(60,180),(120,180))
-        SELECT p.base,p.longer,b.result base_result,l.result longer_result,
-          CASE WHEN b.result=l.result THEN 'stable' WHEN array_position(ARRAY['no_verdict','benign','suspicious','malicious'],l.result)
-           < array_position(ARRAY['no_verdict','benign','suspicious','malicious'],b.result) THEN 'regression' ELSE 'upgrade' END direction,count(*) samples
-        FROM pairs p JOIN results b ON b.arm=p.base JOIN results l ON l.sample_id=b.sample_id AND l.round_id=b.round_id AND l.arm=p.longer
-        GROUP BY p.base,p.longer,b.result,l.result ORDER BY p.base,p.longer,direction,samples DESC""");lift=cur.fetchall()
+        cur.execute("WITH eligible AS (SELECT * FROM metric_eligible), " + BEHAVIOURAL_COVERAGE_CTES)
+        coverage=cur.fetchall()
 
         def new_vtis(base,longer):
             cur.execute("""WITH base_vtis AS (
@@ -276,5 +337,5 @@ def cohort_bundle(window: Window, cohort_type: str):
               ORDER BY samples_gained DESC,severity DESC,operation LIMIT 25""",(base,longer))
             return cur.fetchall()
 
-        return {"exclusions":exclusions,"detection":detection,"lift":lift,"daily":daily,
+        return {"exclusions":exclusions,"detection":detection,"coverage":coverage,"daily":daily,
                 "new_60_180":new_vtis(60,180),"new_60_120":new_vtis(60,120)}
